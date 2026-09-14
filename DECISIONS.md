@@ -171,6 +171,12 @@ Database and role names are set in the PostgreSQL unit (`Environment=`) and repe
 cannot safely reference environment variables in the health command.
 
 ## D-15 Resource budget as cgroup ceilings
+*Amended 2026-09-14: the Cortex XDR agent uses about 1 GiB of the host (docs/01 §1.7),
+so the "about 1.5 GiB for the OS" below is shared with it. The ceilings stay: they are
+maximums, and the expected working set (LiteLLM 1 to 2 GiB, analyzer about 3.5 GiB,
+anonymizer and PostgreSQL under 1 GiB together) leaves headroom. Revisit with the
+`memory.current` figures of docs/04 §4.4 if the host ever swaps.*
+
 Owner's requirement: about 6 GiB RAM and 2 cores for LiteLLM, 6 GiB and 4 cores for
 Presidio, on an 8-core / 15 GiB host. Implemented as `MemoryMax=`, `MemorySwapMax=0` and
 `CPUQuota=` in the `[Service]` section of each unit: Quadlet runs the container with
@@ -201,6 +207,10 @@ archive's manifest digest and resolves as `name:tag@digest` with `--pull=never`;
 wrong digest is refused with "image not known".
 
 ## D-17 SELinux was found disabled and is re-enabled before deployment
+*Confirmed 2026-09-14 (docs/01 §1.7): disabled through `SELINUX=disabled` in the config
+only, after an installation that left it enforcing; files created since are unlabeled,
+so the forced relabel is mandatory, not precautionary.*
+
 The host runs with SELinux disabled. The container design relies on it (container_t
 confinement, `:Z` labels, `container-selinux`). Phase 2 re-enables it the way Red Hat
 documents for a previously disabled system: permissive, forced relabel at boot
@@ -209,7 +219,8 @@ enforcing. The owner's confirmation is required first (phase 1 open question 2).
 
 ## D-18 Online server: images are pulled on the server by pinned digest; cosign at pin time
 Internet access was enabled on the host after phase 1 (owner, 2026-09-14). Packages
-therefore come from Red Hat registration (or the ISO fallback) and images are pulled on
+come from the company Satellite (docs/01 §1.7, docs/03 §3.0; direct Red Hat
+registration is blocked by TLS decryption on the firewall) and images are pulled on
 the server, which removes the OCI-archive transfer of D-16. The trust chain stays the
 one of D-13: `scripts/verify-pins.sh` on the workstation cosign-verifies LiteLLM's
 multi-arch index and checks that the index lists the pinned `linux/amd64` digest,

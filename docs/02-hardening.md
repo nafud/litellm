@@ -8,6 +8,23 @@ for this phase, `scp -r deploy/host infosec@10.50.4.68:/tmp/host` is enough).
 
 Order matters: SELinux first (it needs a reboot and a relabel), then SSH, then firewalls.
 
+Two facts from docs/01 §1.7 frame this phase. The host is managed by Ansible through
+the `devops` account: before changing `sshd_config`, `rsyslog.conf` or firewalld, know
+whether a playbook owns the file (docs/01 §1.8 block B), and have the change made in
+the playbook when it does, otherwise the next run reverts it. And the Cortex XDR agent
+(`traps_pmd.service`, `/opt/traps`) is never stopped, modified or excluded from the
+relabel; it supports SELinux enforcing on RHEL.
+
+## 2.0 Hostname
+
+The host is `localhost`. Satellite registration (docs/03 §3.0), the SIEM, Zabbix and the
+audit trail all need a stable name; agree the FQDN first (docs/01 question 8):
+
+```bash
+sudo hostnamectl set-hostname <name>.xalqbank.az
+hostnamectl; hostname -f
+```
+
 ## 2.1 SELinux: re-enable (currently Disabled)
 
 The whole container design depends on SELinux: container-selinux confines every
@@ -54,18 +71,23 @@ If something is denied later, read the denial rather than lowering the mode:
 
 - Work from `infosec` (member of `wheel`); RHEL's default `%wheel ALL=(ALL) ALL` is enough,
   no `NOPASSWD`.
-- `devops`: keep or remove per the phase 1 answer. To remove SSH access, edit the
-  `AllowUsers` line in `/etc/ssh/sshd_config` (that keyword accumulates across files, so a
-  drop-in cannot narrow it) and lock the account: `sudo usermod -L -e 1 devops`.
+- `devops`: the Ansible automation account (keys from `ansible-control` and
+  `xbbovsransb001`, `NOPASSWD:ALL`). It stays unless decided otherwise; firewalld limits
+  where it can come from (§2.7). To remove SSH access instead, edit the `AllowUsers`
+  line in `/etc/ssh/sshd_config` (that keyword accumulates across files, so a drop-in
+  cannot narrow it) and lock the account: `sudo usermod -L -e 1 devops`.
+- `infosec` has logged in with a password only. Install a key first (§2.3).
 - The stack runs under `llmgw`, created in phase 3: no password, no `sudo`, not in
   `AllowUsers`, not in `wheel`. Podman has no daemon and no root-equivalent group.
 
 ## 2.3 SSH
 
-Confirm key login works before turning password login off:
+Install a key for `infosec` and confirm key login works before turning password login
+off:
 
 ```bash
-# from the workstation
+# from the workstation (generate a key if there is none: ssh-keygen -t ed25519)
+ssh-copy-id infosec@10.50.4.68
 ssh -o PasswordAuthentication=no infosec@10.50.4.68 true && echo "key login OK"
 ```
 
@@ -84,8 +106,8 @@ is in place (D-10). Cipher and MAC lists come from the crypto policy
 
 ## 2.4 Updates
 
-Depends on the package source chosen in docs/03 §3.0 (registration is the expected
-choice now that the host has internet access). Once `dnf repolist` shows repositories:
+Depends on docs/03 §3.0 (Satellite registration). Once `dnf repolist` shows the RHEL 10
+BaseOS and AppStream repositories from the capsule:
 
 ```bash
 sudo dnf -y upgrade && sudo reboot            # if a kernel or glibc update was applied
@@ -107,10 +129,13 @@ refresh instead and record it.
 - Journal: `journalctl --disk-usage`; container logs go to the journal too
   (`LogDriver=journald`), so cap it: `SystemMaxUse=2G` in
   `/etc/systemd/journald.conf.d/size.conf`, then `sudo systemctl restart systemd-journald`.
-- rsyslog listens on TCP 514 on all interfaces. If the phase 1 answer says it is not a
-  deliberate log receiver, remove the `imtcp` input from `/etc/rsyslog.conf` or
-  `/etc/rsyslog.d/*.conf` and `sudo systemctl restart rsyslog`; if it is deliberate,
-  restrict the source in firewalld (§2.7).
+- rsyslog forwards everything to the SIEM (`*.* @@linux-mon.xalqbank.az`) and ships
+  `audit.log` through `imfile`; both stay, and container logs reach the SIEM through
+  `imjournal`. It also runs an unused receiver (`$ModLoad imtcp`,
+  `$InputTCPServerRun 514`). Unless the SIEM team wants this host to relay, remove those
+  two lines (in the playbook if Ansible owns the file, docs/01 §1.8 block B), then
+  `sudo rsyslogd -N1 && sudo systemctl restart rsyslog` and confirm `ss -tlnp` no longer
+  shows 514. If it stays, restrict the source in firewalld (§2.7).
 - Audit rules for the files that decide who can log in, who is root and what the gateway runs:
 
 ```bash
@@ -145,13 +170,17 @@ sudo firewall-cmd --permanent --zone=public --remove-service=cockpit
 sudo firewall-cmd --permanent --zone=public --remove-service=dhcpv6-client
 sudo firewall-cmd --permanent --zone=public --remove-service=ssh
 sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="<admin-cidr>" service name="ssh" accept'
-sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="<zabbix-server-ip>/32" port port="10050" protocol="tcp" accept'
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="<ansible-cidr>" service name="ssh" accept'
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.100.7.150/32" port port="10050" protocol="tcp" accept'
 # only if rsyslog 514 is a deliberate receiver:
 # sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="<log-source-cidr>" port port="514" protocol="tcp" accept'
 sudo firewall-cmd --reload && sudo firewall-cmd --list-all
 ```
 
-`pmd` on 33221 gets no rule unless the phase 1 answer says it needs one. Port 4000 is
+`<admin-cidr>` and `<ansible-cidr>` come from docs/01 question 5 (logins seen from
+10.240.234.19 and 10.50.12.2 for `infosec`, 10.100.8.50 and 10.100.7.60 for `devops`).
+The Cortex XDR agent on 33221 gets no rule unless its administrators say it needs one
+(docs/01 §1.8 block D shows whether it even binds a non-loopback address). Port 4000 is
 not opened in this phase: LiteLLM listens on `127.0.0.1` until validation is complete
 (docs/05 §5.10 opens it for the client subnet).
 

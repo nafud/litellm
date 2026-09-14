@@ -8,34 +8,34 @@ Runtime rationale: D-11; image trust chain: D-13 and D-18.
 
 ## 3.0 Prerequisite: a package source on the server
 
-`dnf` currently has no repositories (`Not registered`, `No repositories available`).
-With internet access the normal path is registration with Red Hat; the ISO remains the
-fallback if no subscription is available (phase 1 open question 1 decides).
+`dnf` currently has no repositories (`Not registered`). docs/01 §1.7 established that
+the company runs a Red Hat Satellite reached through `capsule.xalqbank.az`, that this
+host was registered to it before (the capsule CA package, `redhat.repo`, `rhc` and
+`insights-client` are installed, and the January 2026 update came from it), and that
+direct registration with Red Hat is impossible here (the firewall decrypts TLS to the
+Red Hat hosts, and `cdn.redhat.com` authenticates clients with certificates).
 
-**Option A: register with Red Hat** (needs a Red Hat account or an activation key from
-the customer portal; RHEL 10 uses Simple Content Access, so no `attach` step). On
-2026-09-14 the network firewall blocked `subscription.rhsm.redhat.com` and
-`cdn.redhat.com` (docs/01 §1.4); both must be allowed for this host on TCP 443 first,
-and the §1.4 loop must show an HTTP code for both before running this:
-
-```bash
-sudo subscription-manager register --username <portal-user>            # prompts for the password
-# or, with an activation key:
-sudo subscription-manager register --org <org-id> --activationkey <key-name>
-sudo subscription-manager status                                        # Overall Status: Registered (or Disabled, with SCA)
-sudo dnf repolist                                                       # rhel-10-for-x86_64-baseos-rpms, rhel-10-for-x86_64-appstream-rpms
-```
-
-If the host reaches the internet through an HTTP proxy (docs/01 §1.4 tells), set it for
-both tools before registering, otherwise skip this block:
+**Option A (recommended): register to the Satellite.** Needed from the Satellite owner
+(the `devops` team): the organisation name and an activation key whose content view
+carries RHEL 10 BaseOS and AppStream. The hostname must be set first (docs/02 §2.0).
 
 ```bash
-sudo subscription-manager config --server.proxy_hostname=<proxy> --server.proxy_port=<port>
-echo 'proxy=http://<proxy>:<port>' | sudo tee -a /etc/dnf/dnf.conf
+grep -E '^(hostname|prefix|baseurl)\s*=' /etc/rhsm/rhsm.conf         # capsule.xalqbank.az, /rhsm, https://capsule.xalqbank.az/pulp/content
+sudo subscription-manager register --org="<organisation>" --activationkey="<key>"
+sudo subscription-manager identity                                     # system identity, org name
+sudo subscription-manager repos --list-enabled | grep -E '^Repo ID'   # rhel-10-for-x86_64-baseos-rpms, rhel-10-for-x86_64-appstream-rpms
+sudo dnf repolist && sudo dnf -q check-update | head -5
 ```
 
-**Option B: RHEL 10.1 installation ISO as a local repository** (no updates until
-repeated with a newer ISO; docs/02 §2.4 then needs a manual monthly refresh):
+If the capsule CA package were missing or stale (`rpm -qi katello-ca-consumer-capsule.xalqbank.az`
+shows its date), the Satellite owner re-issues it:
+`sudo dnf install http://capsule.xalqbank.az/pub/katello-ca-consumer-latest.noarch.rpm`
+(over HTTP by design, it carries the CA itself; then verify its RPM signature against
+the Satellite's key with the owner). Insights and `rhc` are the company's choice; they
+were installed with the capsule package and are not part of this deployment.
+
+**Option B (fallback only): the RHEL 10.1 installation ISO as a local repository**, no
+updates until repeated with a newer ISO, docs/02 §2.4 then needs a manual monthly refresh:
 
 ```bash
 sudo mkdir -p /mnt/rhel10 && sudo mount -o ro,loop /path/to/rhel-10.1-x86_64-dvd.iso /mnt/rhel10
@@ -160,8 +160,10 @@ was taken from. The LiteLLM index was cosign-verified with the vendored key when
 pins were chosen (`scripts/verify-pins.sh` on the workstation, D-18); on the server the
 pull is by digest, so Podman itself rejects any manifest that does not hash to the pin.
 
-No proxy is in the path on this host (docs/01 §1.4), and `ghcr.io` and Docker Hub
-answered, so nothing to configure for Podman. (With a proxy it would go into
+No proxy is in the path on this host (docs/01 §1.4), `ghcr.io` and Docker Hub answered
+with valid certificates, and docs/01 §1.8 block A must have shown the layer hosts
+(`pkg-containers.githubusercontent.com`, `*.docker.com`) answering too; then nothing
+is configured for Podman. (With a proxy it would go into
 `~llmgw/.config/environment.d/proxy.conf` as `https_proxy=`.)
 
 **Server**, as `llmgw`:

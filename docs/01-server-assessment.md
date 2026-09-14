@@ -19,16 +19,16 @@ and can be re-run after hardening for a diff. Reports stay out of the repository
 | OS | RHEL 10.1 (Coughlan), kernel 6.12.0-124.28.1.el10_1, x86_64, VMware guest (`ens33`) | Podman + Quadlet (D-11) |
 | CPU / RAM | 8 cores (Xeon Platinum 8280, 1 thread/core), 15 GiB RAM, 2 GiB swap | Budget: LiteLLM 2 CPU / 6 GiB, Presidio 4 CPU / 6 GiB, PostgreSQL 1 CPU / 1.5 GiB, OS the rest (D-15) |
 | Disk | LVM root 417 GB, 405 GB free; `/tmp` tmpfs 7.7 GB | `/opt/llm-gateway` on root, including the image store (~4 GB after the pulls) |
-| Accounts | `infosec` (uid 1001, wheel) and `devops` both allowed by sshd; both have subordinate id ranges | Decide whether `devops` keeps access (open question) |
+| Accounts | `infosec` (uid 1001, wheel, logs in with a password) and `devops` (uid 1000, wheel, `NOPASSWD:ALL`, keys from `ansible-control` and `xbbovsransb001`, 75 logins from 10.100.8.50) | `devops` is the Ansible automation account of the infrastructure team (§1.7); its playbooks may manage files phase 2 changes |
 | SSH | port 22, `PermitRootLogin no`, `PasswordAuthentication yes`, keys allowed, `AllowUsers devops infosec` | Password auth to be disabled (docs/02 §2.2) once key login is confirmed |
 | Crypto policy | `DEFAULT:NO-WEAKMAC:NO-SSHWEAKMACS` | Fine, keep |
-| SELinux | **Disabled** | Must be re-enabled before deployment (docs/02 §2.5); the units rely on it |
+| SELinux | **Disabled** via `SELINUX=disabled` in `/etc/selinux/config` only (no `selinux=0` on the kernel line); files created since are unlabeled (`?`) | Must be re-enabled before deployment (docs/02 §2.1) with a forced relabel; the units rely on it |
 | firewalld | installed, **not running** | To be enabled with an explicit inbound policy (docs/02 §2.7) |
 | nftables | 1.1.1 installed, service state unknown | Used for the egress policy (docs/02 §2.8) |
-| Listening | sshd 22; rsyslogd **TCP 514 on all interfaces**; zabbix_agentd 10050; `pmd` UDP+TCP 33221; chronyd 323 (loopback) | rsyslog input listener and `pmd` need explanation (open questions); zabbix is monitoring |
+| Listening | sshd 22; rsyslogd **TCP 514 on all interfaces**; zabbix_agentd 10050; `pmd` UDP+TCP 33221; chronyd 323 (loopback) | `pmd` is the Cortex XDR agent (keep, §1.7); rsyslog forwards to the SIEM and also runs an unused receiver on 514 (§1.7); Zabbix server is 10.100.7.150 |
 | Network | `ens33` 10.50.4.68/24, gateway 10.50.4.254, resolvers 10.100.0.1 and 10.100.0.2 | Egress policy resolvers filled in; LAN address for the client-facing port later |
 | Time / audit | chronyd active, auditd active | Keep |
-| Subscription | **Not registered, no dnf repositories** | Podman cannot be installed until a package source exists (docs/03 §3.0) |
+| Subscription | **Not registered, no dnf repositories**; the Satellite capsule CA package is installed and `/etc/rhsm/ca/katello-server-ca.pem` exists | The company runs a Satellite (`capsule.xalqbank.az`); registration there is the package source (docs/03 §3.0 option A) |
 | Egress | at assessment time ghcr.io, Docker Hub, GitHub, cdn.redhat.com all **timed out**; **internet access was enabled afterwards** (owner, 2026-09-14) | Packages and images are fetched on the server (D-18); §1.4 re-checks what is reachable and whether a proxy is in the path |
 | cgroups | `cpu memory pids` delegated to user sessions | CPU and memory quotas work for the rootless service account without any drop-in |
 | Containers | Podman, skopeo, container-selinux, passt not installed | Installed in phase 3 |
@@ -36,21 +36,30 @@ and can be re-run after hardening for a diff. Reports stay out of the repository
 
 ## 1.3 Open questions (answers needed before phase 2 starts)
 
-1. **Package source.** §1.4 showed Red Hat's registration and content hosts blocked
-   while GitHub and the registries answer. Best practice is registration (updates keep
-   flowing, `dnf-automatic`); it needs the network firewall to allow the host to
-   `subscription.rhsm.redhat.com:443` and `cdn.redhat.com:443` (plus
-   `cert-api.access.redhat.com:443` only if Insights is wanted). Alternatives: an
-   internal Satellite if the company has one, or the RHEL 10.1 ISO (no updates).
-   §1.6 block A characterises the block precisely for the firewall request; block B
-   shows how the VM was built (kickstart repo, Satellite CA) which may settle this.
+1. **Package source.** Answered by §1.7: the company Satellite via
+   `capsule.xalqbank.az` (its CA package is installed, `rhc` and `insights-client` too,
+   and the January update came through it). Direct Red Hat registration is not an
+   option anyway: the firewall decrypts TLS to the Red Hat hosts and `cdn.redhat.com`
+   authenticates clients with entitlement certificates, which does not survive
+   interception. Needed from the Satellite owner (the `devops` team): an activation key
+   and the organisation name, and a content view that carries RHEL 10 BaseOS and
+   AppStream. Before registering, the host needs a real hostname (§1.7).
 2. **SELinux.** It is disabled. Was that a deliberate choice by whoever built the VM? The
    plan re-enables it (permissive, relabel, then enforcing); confirm before phase 2.
-3. **`pmd` on port 33221** and the **rsyslog listener on 514**: what are they, and are they
-   corporate standard (keep and allow in firewalld) or leftovers (remove)?
-4. **`devops` account**: keep its SSH access or not?
-5. **Admin source network** for the SSH firewall rule, and the **Zabbix server address**
-   for port 10050.
+3. **`pmd` on port 33221**: answered (§1.7), it is the Cortex XDR agent, kept. **rsyslog
+   listener on 514**: it is a receiver with no clients next to the SIEM forwarder; remove
+   the two listener lines, or keep them if the SIEM team says the host is meant to relay.
+   Is `/etc/rsyslog.conf` managed by the Ansible playbooks (§1.8 block B tells)?
+4. **`devops` account**: it is the Ansible automation account (§1.7). Keeping it is the
+   likely answer; the real question is what its playbooks manage on this host (§1.8
+   block B), because a playbook that rewrites `sshd_config`, `rsyslog.conf` or firewalld
+   would undo phase 2. Its `NOPASSWD:ALL` sudo and password login stay as the team's
+   standard unless you decide otherwise.
+5. **Zabbix server**: answered, `Server=10.100.7.150` (passive checks; `ServerActive` is
+   loopback, so no outbound). **Admin source networks**: logins came from 10.240.234.19
+   (you, now), 10.50.12.2 (you), 10.100.8.50 and 10.100.7.60 (`devops`). Name the
+   ranges to allow for SSH (a VPN pool and the automation hosts), not single addresses
+   if they are dynamic.
 6. **Internet path**: answered by §1.4 (2026-09-14): direct via 10.50.4.254, no proxy
    anywhere. Selective: `github.com` 200, `ghcr.io/v2/` and `registry-1.docker.io/v2/`
    401 (open), `subscription.rhsm.redhat.com` and `cdn.redhat.com` 000 (blocked).
@@ -59,6 +68,11 @@ and can be re-run after hardening for a diff. Reports stay out of the repository
 7. **Workstation OS** (the machine you SSH from): `scp` is enough for the deployment;
    `skopeo` and `cosign` are needed only to run `scripts/verify-pins.sh` when an image
    pin is chosen or changed (D-18).
+8. **Hostname**: the host is `localhost`. Satellite needs a unique FQDN and the SIEM,
+   Zabbix and audit records need a stable name. Which name and domain
+   (`xalqbank.az` is the company domain seen in the configs)?
+9. **SSH key for `infosec`**: logins so far were password logins. A key must be
+   installed and tested before docs/02 §2.2 disables passwords (§1.8 block C).
 
 ## 1.4 Re-check after internet access was enabled
 
@@ -196,6 +210,87 @@ chronyc sources 2>&1; timedatectl | head -4
 ```
 
 **H. Question 7** is about the workstation, not the server: its OS name and version.
+
+## 1.7 Results of the targeted checks (2026-09-14)
+
+| Item | Result | Consequence |
+|------|--------|-------------|
+| Red Hat hosts | IPv4 fails with "self-signed certificate in certificate chain" (`subscription.rhsm.redhat.com`, `cdn.redhat.com`) and "unable to get local issuer certificate" (`cert-api.access.redhat.com`); no IPv6 address or route; `access.redhat.com`, `pypi.org`, `quay.io`, `api.openai.com` pass with valid TLS | A firewall decryption policy covers the Red Hat content hosts; direct registration is out. Everything the deployment pulls (GHCR, Docker Hub) passed certificate verification, so it is not decrypted; the blob hosts are checked in §1.8 |
+| Build | Kickstart from the RHEL 10 ISO on 2025-07-18, minimal environment, no `selinux` line (default enforcing at install), `timesource --ntp-disable`, `network --ipv6=auto` | SELinux was disabled by hand after installation; chrony was configured later (synced to `ntp2/ntp3.xalqbank.az`) |
+| Satellite | `katello-ca-consumer-capsule.xalqbank.az-1.0-2` installed, `katello-server-ca.pem` present, `redhat.repo` present, `rhc` and `insights-client` installed; not registered now; `dnf history` shows a 16-package update on 2026-01-22 (kernel 6.12.0-124.28.1.el10_1) | The host was registered to the Satellite at least once and is unregistered now (why is a question for the `devops` team); re-registering restores updates without any internet dependency |
+| SELinux | `SELINUX=disabled` in the config; kernel line clean; kernel logs "SELinux: Initializing" then the runtime-disable deprecation notice; `/etc/passwd`, `/home/infosec`, `/opt/traps` unlabeled, `/home/devops` labeled | Policy is simply not loaded; the D-17 procedure applies and the forced relabel is mandatory |
+| `pmd` 33221 | `/opt/traps/bin/pmd`, `traps_pmd.service`, "Palo Alto Networks Cortex XDR Agent", not from a package (installed from `/opt/traps/download/installer.rpm` on 2026-01-07), about 1 GiB RSS, 106 threads, no established connections on 33221 | Corporate EDR, kept and never touched. Its memory is part of the OS share of the budget (D-15 amended). Port 33221 is not opened in firewalld unless the XDR administrators say it must be |
+| rsyslog | `*.* @@linux-mon.xalqbank.az` (forwards everything to the SIEM over TCP), `imfile` on `/var/log/audit/audit.log`, plus `$ModLoad imtcp` / `$InputTCPServerRun 514` with nobody connected | Forwarding stays (container logs reach the SIEM through the journal); the receiver is unused and is removed in phase 2 unless the SIEM team objects |
+| Zabbix | `Server=10.100.7.150`, `ServerActive=127.0.0.1`, `Hostname=Zabbix server` (template default) | firewalld rule: TCP 10050 from 10.100.7.150 only |
+| Admin logins | `infosec` by password from 10.240.234.19 and 10.50.12.2; `devops` by key from 10.100.8.50 (`ansible-control`) and 10.100.7.60 | Ranges to be named (question 5); a key for `infosec` before passwords go (question 9) |
+| `devops` | uid 1000, wheel, `/etc/sudoers.d/devops: NOPASSWD:ALL`, password set, two keys (`devops@ansible-control`, `devops@xbbovsransb001.xalqbank.az`), three sessions this morning between 10:15 and 10:25 around the 10:22 reboot | Ansible automation account; its playbooks are the thing to understand before phase 2 (§1.8 block B) |
+| firewalld / nftables | both `disabled`; `public` zone on disk still has the installer defaults (`ssh`, `dhcpv6-client`, `cockpit`, `forward`); nft ruleset empty | Clean slate for docs/02 §2.7 and §2.8; `cockpit` service is removed from the zone (not installed) |
+| Hostname | `localhost` | Set an FQDN before Satellite registration (question 8) |
+| Extras | `openssl-devel`, `openssl-perl` and 60 other packages from `install openssl*`, `htop` | Development packages are not needed on a gateway; removal is a phase 2 option, not a requirement |
+| Time | chrony synced to two internal servers, timezone Asia/Baku, RTC in UTC | Fine |
+
+## 1.8 Second round of read-only checks
+
+**A. Image pull path: the layer downloads redirect to other hosts than the registries**
+
+```bash
+probe() {
+  local reg=$1 tok repo=$3 dg=$4 cfg
+  tok=$(curl -sS --max-time 10 "$2" | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])') || { echo "$reg: no token"; return; }
+  cfg=$(curl -sS --max-time 10 -H "Authorization: Bearer $tok" -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+        "https://$reg/v2/$repo/manifests/$dg" | python3 -c 'import json,sys;print(json.load(sys.stdin)["config"]["digest"])') || { echo "$reg: manifest unreadable"; return; }
+  printf '%-24s manifest OK, config blob %s\n' "$reg" "${cfg:0:19}"
+  curl -sS --max-time 20 -L -o /dev/null -w '                         blob: HTTP %{http_code} %{size_download} bytes from %{url_effective}\n' \
+       -H "Authorization: Bearer $tok" "https://$reg/v2/$repo/blobs/$cfg" 2>&1 | sed -E 's#(https://[^/]+)/.*#\1#'
+}
+probe ghcr.io 'https://ghcr.io/token?scope=repository:berriai/litellm-non_root:pull' berriai/litellm-non_root sha256:833abd09590afee0119dd574212fb01294dcc7d940ad21fabc0bf0681a9f4aea
+probe registry-1.docker.io 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/postgres:pull' library/postgres sha256:7341002d2b8c7c5bdd7542a671a95b36196c0b5b888daf454ae4fc33ba5346d7
+```
+
+Expected: `HTTP 200` with a few thousand bytes from `pkg-containers.githubusercontent.com`
+and from `production.cloudfront.docker.com` (or another `*.docker.com` host). A
+certificate error or `000` there means the pull will fail although the registries
+answered, and that host has to be exempted from decryption.
+
+**B. What the Ansible playbooks manage on this host (question 4, and phase 2 safety)**
+
+```bash
+sudo grep -rlE 'Ansible managed|ansible' /etc 2>/dev/null | head -30
+sudo journalctl _COMM=sudo --since -90d | grep 'devops' | grep -oE 'COMMAND=.*' | sed -E 's/[0-9a-f]{32,}//g' | sort | uniq -c | sort -rn | head -25
+sudo ls -la /home/devops/ /home/devops/.ansible 2>&1 | head -20
+sudo grep -iE 'register|unregister|identity|error' /var/log/rhsm/rhsm.log 2>/dev/null | tail -10
+```
+
+The `sudo` journal shows the commands Ansible ran as root (with hashes removed to keep
+lines short); files under `/etc` carrying an "Ansible managed" header are the ones a
+playbook will rewrite. The rhsm log shows when and why the host left the Satellite.
+
+**C. Satellite reachability and the current rhsm configuration (question 1)**
+
+```bash
+grep -E '^(hostname|port|prefix|baseurl|repo_ca_cert)\s*=' /etc/rhsm/rhsm.conf
+rpm -qi katello-ca-consumer-capsule.xalqbank.az | grep -E '^(Version|Install Date)'
+getent hosts capsule.xalqbank.az
+curl -sS --cacert /etc/rhsm/ca/katello-server-ca.pem -o /dev/null -w 'capsule HTTP %{http_code}\n' --max-time 8 https://capsule.xalqbank.az/
+curl -sS --cacert /etc/rhsm/ca/katello-server-ca.pem -o /dev/null -w 'rhsm API HTTP %{http_code}\n' --max-time 8 https://capsule.xalqbank.az/rhsm/
+sudo grep -vE '^\s*(#|$)' /etc/yum.repos.d/redhat.repo | head -12
+hostnamectl
+ls -l ~/.ssh/authorized_keys 2>&1
+```
+
+`hostname = capsule.xalqbank.az` in `rhsm.conf` and an HTTP code from both URLs mean
+the registration path is intact; `redhat.repo` shows which repositories the last
+registration enabled (RHEL 10 BaseOS and AppStream are needed). The last line answers
+question 9.
+
+**D. Cortex XDR agent details (informational, read-only)**
+
+```bash
+sudo /opt/traps/bin/cytool info 2>&1 | head -12
+sudo ss -tulpnH sport = :33221
+```
+
+Shows the agent version and whether 33221 is bound to loopback or to all addresses.
 
 ## 1.5 Exit criteria
 
