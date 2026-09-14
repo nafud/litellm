@@ -44,7 +44,7 @@ locations. Keep it out of the repository; share it in the conversation instead.
 | 2 capacity | Presidio analyzer workers (~1 GB RAM each), PostgreSQL `shm_size`, disk for the `pgdata` volume and image cache (plan for at least 10 GB free) |
 | 3 accounts | Which accounts to keep, whether a dedicated admin user exists, a free subordinate id range for the `llmgw` service account |
 | 4 SSH | Key-only auth, root login, allowed users, cipher policy |
-| 5 network | Which interface/IP LiteLLM should bind to (`LITELLM_BIND_ADDR`), whether a proxy is required for egress |
+| 5 network | Which interface/IP LiteLLM should bind to (`PublishPort=` in the LiteLLM unit), the host resolvers for the egress policy, whether a proxy is required for egress |
 | 6 firewall | firewalld zone and rules; nftables backend (needed for the egress policy in docs/02 §2.8) |
 | 8 packages | Pending security updates; whether Podman/container-selinux are already installed and at which version |
 | 9 controls | SELinux/AppArmor mode, audit, time sync, sysctl baseline |
