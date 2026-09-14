@@ -4,12 +4,14 @@ Description=LLM gateway: Presidio analyzer
 
 [Container]
 ContainerName=presidio-analyzer
-Image=ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364@sha256:ae8f6f111ac2f04e3fec552f7f80edd0dcbfa2dd69ee1b9e030475be31669885
+# linux/amd64 manifest digest; listed by index sha256:ae8f6f111ac2f04e3fec552f7f80edd0dcbfa2dd69ee1b9e030475be31669885.
+Image=ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364@sha256:674328b4724b86bde064cf806f32b60a6fb25afe19aa39853e23c8d94d1c99e7
 Pull=never
 # The image runs as uid 1001 and serves gunicorn on $PORT.
 Environment=PORT=3000
-# gunicorn workers; each loads the spaCy model (~1 GB RAM). Raise only deliberately.
-Environment=WORKERS=1
+# gunicorn workers; each loads the spaCy model (~1 GB RAM) and is single-threaded, so
+# workers = parallel requests. Sized to the 3-CPU / 5 GiB budget below.
+Environment=WORKERS=3
 # Read-only root filesystem. ReadOnlyTmpfs (default true) still provides a writable tmpfs
 # on /tmp, /run, /var/tmp and /dev/shm, which gunicorn needs for its heartbeat files.
 ReadOnly=true
@@ -30,6 +32,10 @@ Notify=healthy
 Restart=always
 RestartSec=5
 TimeoutStartSec=300
+# Presidio budget (6 GiB, 4 CPUs) split: analyzer 5 GiB / 3 CPUs, anonymizer 1 GiB / 1 CPU.
+MemoryMax=5G
+MemorySwapMax=0
+CPUQuota=300%
 
 [Install]
 WantedBy=default.target

@@ -1,12 +1,13 @@
 # PostgreSQL 18: virtual keys, spend logs, guardrail traces.
-# Image pinned by tag AND digest; change both together and re-run scripts/verify-images.sh.
+# Image pinned by tag AND digest; change both together with bin/images.tsv (docs/06 §6.3).
 [Unit]
 Description=LLM gateway: PostgreSQL 18
 
 [Container]
 ContainerName=postgres
-Image=docker.io/library/postgres:18.6@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
-# Never pull at service start: images are pulled and verified deliberately (docs/03).
+# linux/amd64 manifest digest; listed by index sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280.
+Image=docker.io/library/postgres:18.6@sha256:7341002d2b8c7c5bdd7542a671a95b36196c0b5b888daf454ae4fc33ba5346d7
+# Never pull at service start: images are transferred and verified deliberately (docs/03).
 Pull=never
 # Run directly as uid/gid 999 (the image's 'postgres' user). The entrypoint then skips its
 # root-only chown/gosu step, so no capability is needed at all. keep-id maps the host user
@@ -19,11 +20,11 @@ Group=999
 # only POSTGRES_PASSWORD lives in the env file (mode 0600, outside the repository).
 Environment=POSTGRES_DB=litellm
 Environment=POSTGRES_USER=litellm
-EnvironmentFile=/opt/llm-gateway/env/postgres.env
+EnvironmentFile=/opt/llm-gateway/postgres/postgres.env
 # PostgreSQL 18 image layout: PGDATA is /var/lib/postgresql/18/docker and the volume
 # mount point is /var/lib/postgresql (NOT /var/lib/postgresql/data as in <= 17).
-# :Z = private SELinux label for this container only.
-Volume=/opt/llm-gateway/data/postgres:/var/lib/postgresql:Z
+# :Z = private SELinux label for this container only (ignored while SELinux is disabled).
+Volume=/opt/llm-gateway/postgres/data:/var/lib/postgresql:Z
 ShmSize=256m
 Network=llmgw-backend.network
 DropCapability=all
@@ -43,6 +44,10 @@ Notify=healthy
 Restart=always
 RestartSec=5
 TimeoutStartSec=180
+# Remainder of the 15 GiB host after LiteLLM (6) and Presidio (6), leaving ~1.5 GiB to the OS.
+MemoryMax=1500M
+MemorySwapMax=0
+CPUQuota=100%
 
 [Install]
 WantedBy=default.target

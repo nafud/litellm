@@ -1,14 +1,14 @@
 # Phase 4: Deploy the stack
 
 Everything in this phase runs as the service account (`sudo machinectl shell llmgw@`,
-docs/03 §3.3), with the repository at `/opt/llm-gateway/repo` and the images already
-pulled and verified (docs/03 §3.6). Nothing here needs root.
+docs/03 §3.6), with the tree at `/opt/llm-gateway` and the images loaded and verified
+(docs/03 §3.7). Nothing here needs root.
 
 ## 4.1 Create the two secret files
 
 ```bash
-llmgw$ install -m 600 /opt/llm-gateway/repo/deploy/env/postgres.env.example /opt/llm-gateway/env/postgres.env
-llmgw$ install -m 600 /opt/llm-gateway/repo/deploy/env/litellm.env.example  /opt/llm-gateway/env/litellm.env
+llmgw$ install -m 600 /opt/llm-gateway/postgres/postgres.env.example /opt/llm-gateway/postgres/postgres.env
+llmgw$ install -m 600 /opt/llm-gateway/litellm/litellm.env.example  /opt/llm-gateway/litellm/litellm.env
 ```
 
 Generate values (hex only: they are embedded in a URL and passed without quoting):
@@ -26,32 +26,30 @@ Edit both files (`vi`) and fill in:
 
 | File | Variable | Value |
 |------|----------|-------|
-| `postgres.env` | `POSTGRES_PASSWORD` | generated |
-| `litellm.env` | `DATABASE_URL` | the line printed above (same password) |
-| `litellm.env` | `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`, `UI_PASSWORD` | generated |
-| `litellm.env` | `ANTHROPIC_API_KEY` (and others) | the company's provider keys |
+| `postgres/postgres.env` | `POSTGRES_PASSWORD` | generated |
+| `litellm/litellm.env` | `DATABASE_URL` | the line printed above (same password) |
+| `litellm/litellm.env` | `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`, `UI_PASSWORD` | generated |
+| `litellm/litellm.env` | `ANTHROPIC_API_KEY` (and others) | the company's provider keys |
 
 ```bash
-llmgw$ grep -c REPLACE /opt/llm-gateway/env/*.env      # both must print 0
-llmgw$ ls -l /opt/llm-gateway/env                       # -rw------- llmgw llmgw
+llmgw$ grep -c REPLACE /opt/llm-gateway/*/*.env      # both must print 0
+llmgw$ ls -l /opt/llm-gateway/*/*.env                 # -rw------- llmgw llmgw
 ```
 
 Store `LITELLM_SALT_KEY` in the company password manager now: it cannot be rotated
 without losing encrypted DB content, and a restored database is useless without it.
 The database and role names (`litellm`/`litellm`) are fixed in
-`deploy/quadlet/llmgw-postgres.container`; only the password is in the env file.
+`postgres/llmgw-postgres.container`; only the password is in the env file.
 
 ## 4.2 Install the Quadlet units
 
-The units stay in the repository; the rootless Quadlet search path is a symlink to them
-(symlinks are supported for the base of the search path, `podman-systemd.unit(5)`).
+The units stay next to their components; the rootless Quadlet search path
+`~/.config/containers/systemd` receives symlinks to them (supported by
+`podman-systemd.unit(5)`):
 
 ```bash
-llmgw$ mkdir -p ~/.config/containers
-llmgw$ ln -s /opt/llm-gateway/repo/deploy/quadlet ~/.config/containers/systemd
+llmgw$ bash /opt/llm-gateway/bin/link-quadlets.sh
 llmgw$ /usr/libexec/podman/quadlet --user --dryrun >/dev/null && echo "quadlet: OK"
-llmgw$ systemctl --user daemon-reload
-llmgw$ systemctl --user list-unit-files 'llmgw-*'
 ```
 
 Expected: six generated units (`llmgw-backend-network`, `llmgw-egress-network`,
@@ -69,10 +67,10 @@ check passes, so `systemctl --user start` blocks until then (or fails).
 ```bash
 llmgw$ systemctl --user start llmgw-postgres.service
 llmgw$ journalctl --user -u llmgw-postgres.service -n 30 --no-pager   # "database system is ready to accept connections"
-llmgw$ ls -l /opt/llm-gateway/data/postgres/                            # 18/ owned by llmgw
+llmgw$ ls -l /opt/llm-gateway/postgres/data/                            # 18/ owned by llmgw
 
 llmgw$ systemctl --user start llmgw-presidio-anonymizer.service llmgw-presidio-analyzer.service
-llmgw$ journalctl --user -u llmgw-presidio-analyzer.service -n 20 --no-pager   # gunicorn workers booted (~1 min: spaCy model load)
+llmgw$ journalctl --user -u llmgw-presidio-analyzer.service -n 20 --no-pager   # 3 gunicorn workers booted (~1 min: spaCy model load)
 
 llmgw$ systemctl --user start llmgw-litellm.service
 llmgw$ journalctl --user -u llmgw-litellm.service -n 80 --no-pager
@@ -89,15 +87,16 @@ and systemd retries every 5 s (`Restart=always`). The usual cause is a `DATABASE
 that does not match `postgres.env`; fix the file and `systemctl --user restart llmgw-litellm.service`.
 
 ```bash
-llmgw$ systemctl --user list-units 'llmgw-*'      # all active
-llmgw$ podman ps --format '{{.Names}}\t{{.Status}}'  # four containers, each "(healthy)"
+llmgw$ systemctl --user list-units 'llmgw-*'          # all active
+llmgw$ podman ps --format '{{.Names}}\t{{.Status}}'      # four containers, each "(healthy)"
+sudo ausearch -m AVC -ts recent                          # (admin) no denials while permissive
 ```
 
 No `systemctl enable` is needed: the units carry `WantedBy=default.target`, so the
 generator wires them into the user manager's boot; with lingering enabled they start at
 host boot. Confirm: `systemctl --user list-dependencies default.target | grep llmgw`.
 
-## 4.4 Confirm the security posture of the running containers
+## 4.4 Confirm the security posture and the resource limits
 
 ```bash
 llmgw$ podman inspect litellm  --format 'user={{.Config.User}} capdrop={{.HostConfig.CapDrop}} secopt={{.HostConfig.SecurityOpt}}'
@@ -106,6 +105,15 @@ llmgw$ podman inspect presidio-analyzer --format 'readonly={{.HostConfig.Readonl
 llmgw$ podman network inspect llmgw-backend --format 'internal={{.Internal}}'    # true
 llmgw$ podman exec postgres id                                                     # uid=999(postgres)
 llmgw$ ps -o user,comm -C pasta -C rootlessport -C conmon                          # all llmgw
+llmgw$ for u in litellm presidio-analyzer presidio-anonymizer postgres; do systemctl --user show llmgw-$u.service -p MemoryMax -p CPUQuotaPerSecUSec | tr '\n' ' '; echo " $u"; done
+```
+
+Expected limits: litellm `6G` / `2s` (2 CPUs), analyzer `5G` / `3s`, anonymizer `1G` /
+`1s`, postgres `1500M` / `1s`. The kernel view of the same values:
+
+```bash
+llmgw$ cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/app.slice/llmgw-litellm.service/memory.max
+llmgw$ cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/app.slice/llmgw-litellm.service/cpu.max   # "200000 100000"
 ```
 
 From the admin account:
@@ -115,23 +123,20 @@ sudo ss -tlnp | grep ':4000 '                       # 127.0.0.1:4000 only, proce
 sudo ss -tlnp | grep -E ':(5432|3000) ' || echo "postgres/presidio not published: OK"
 ```
 
-Egress check from the internal network (must fail) and from LiteLLM (must succeed, it
-is the only container on `llmgw-egress`):
+Egress: from the internal network it must fail; from LiteLLM only TCP 443 is allowed by
+the host policy, and the network firewall decides which hosts answer:
 
 ```bash
 llmgw$ podman exec presidio-anonymizer curl -sS --max-time 5 https://ghcr.io/ || echo "no egress from backend network: OK"
+llmgw$ podman exec litellm python3 -c "import socket; socket.create_connection(('1.1.1.1', 80), timeout=5)"   # must time out
+sudo journalctl -k --since -5min | grep llmgw-egress-drop                                                       # one drop logged
 llmgw$ podman exec litellm python3 -c "import urllib.request; print(urllib.request.urlopen('https://api.anthropic.com/', timeout=10).status)"
 ```
 
-The second command prints an HTTP status (any code proves the TLS path is open). If
-docs/02 §2.8 is applied, a non-443 attempt from LiteLLM is dropped and logged:
+The last command works only once the network firewall rule for the provider exists; any
+HTTP status proves the path.
 
-```bash
-llmgw$ podman exec litellm python3 -c "import socket; socket.create_connection(('1.1.1.1', 80), timeout=5)"   # must time out
-sudo journalctl -k --since -5min | grep llmgw-egress-drop
-```
-
-## 4.5 Reboot test
+## 4.5 Reboot test, then enforcing
 
 ```bash
 sudo reboot
@@ -140,12 +145,15 @@ sudo machinectl shell llmgw@
 llmgw$ systemctl --user list-units 'llmgw-*' && podman ps --format '{{.Names}}\t{{.Status}}'
 ```
 
-All four containers must come back healthy without anyone starting them.
+All four containers must come back healthy without anyone starting them. With no AVC
+denials recorded through §4.3 and §4.4, switch SELinux to enforcing (docs/02 §2.1) and
+repeat `podman ps` and one request from docs/05 §5.1.
 
 ## 4.6 Exit criteria
 
 - Four containers healthy; LiteLLM log shows the guardrail loaded and Uvicorn listening.
 - Only `127.0.0.1:4000` is listening on the host, owned by `llmgw`.
+- Limits reported by `systemctl --user show` match the units.
 - `llmgw-backend` is internal and the egress test from Presidio fails.
-- The stack survives a reboot.
+- The stack survives a reboot; SELinux is enforcing with no denials.
 - Proceed to `docs/05-validation.md`.

@@ -12,11 +12,13 @@ After=llmgw-presidio-analyzer.service llmgw-presidio-anonymizer.service
 
 [Container]
 ContainerName=litellm
-# Non-root variant (uid 65534), signed with the key vendored in deploy/cosign/.
-Image=ghcr.io/berriai/litellm-non_root:v1.100.1@sha256:c36f3b27a5a817329e0fcf9c4e3a7bf58b62a5a736ad5352f0a5771c1be58404
+# Non-root variant (uid 65534). Pinned to the linux/amd64 manifest digest (the bytes that
+# are loaded on the server); it is listed by the cosign-signed multi-arch index
+# sha256:c36f3b27a5a817329e0fcf9c4e3a7bf58b62a5a736ad5352f0a5771c1be58404 (see bin/images.tsv).
+Image=ghcr.io/berriai/litellm-non_root:v1.100.1@sha256:833abd09590afee0119dd574212fb01294dcc7d940ad21fabc0bf0681a9f4aea
 Pull=never
 # Secrets only LiteLLM may see: master key, salt key, DATABASE_URL, UI login, provider keys.
-EnvironmentFile=/opt/llm-gateway/env/litellm.env
+EnvironmentFile=/opt/llm-gateway/litellm/litellm.env
 # Presidio endpoints on the internal network; read by the guardrail at startup.
 Environment=PRESIDIO_ANALYZER_API_BASE=http://presidio-analyzer:3000
 Environment=PRESIDIO_ANONYMIZER_API_BASE=http://presidio-anonymizer:3000
@@ -31,8 +33,8 @@ Environment=LITELLM_LOG=INFO
 Environment=NO_DOCS=True
 Environment=NO_REDOC=True
 Environment=LITELLM_DONT_SHOW_FEEDBACK_BOX=True
-# Configuration from the repository checkout, read-only, private SELinux label.
-Volume=/opt/llm-gateway/repo/deploy/litellm/config.yaml:/app/config.yaml:ro,Z
+# Configuration, read-only, private SELinux label (ignored while SELinux is disabled).
+Volume=/opt/llm-gateway/litellm/config.yaml:/app/config.yaml:ro,Z
 Tmpfs=/tmp
 # Loopback only until TLS termination is in place (DECISIONS.md D-10); the address is
 # deployment configuration and is changed here, committed, then the unit reloaded.
@@ -55,8 +57,13 @@ Notify=healthy
 [Service]
 Restart=always
 RestartSec=5
-# Prisma migration + spaCy-independent startup can exceed the 90 s systemd default.
+# Prisma migration at first start can exceed the 90 s systemd default.
 TimeoutStartSec=300
+# Resource budget for LiteLLM: 6 GiB RAM, 2 CPUs (ceilings enforced by cgroup v2 on the
+# service's cgroup, which contains the container because Quadlet uses --cgroups=split).
+MemoryMax=6G
+MemorySwapMax=0
+CPUQuota=200%
 
 [Install]
 WantedBy=default.target

@@ -1,84 +1,57 @@
 # Phase 1: Server assessment (read-only)
 
 Goal: know exactly what we are deploying onto before changing anything. Hardening
-(phase 2) is driven by this report, not by a generic checklist.
+(phase 2) is driven by this report, not by a generic checklist. Nothing in this phase
+modifies the server.
 
-Nothing in this phase modifies the server.
+## 1.1 How it was done
 
-## 1.1 Get the script onto the server
+The admin (`infosec`) ran read-only commands over SSH and pasted the output into the
+working conversation; `scripts/assess.sh` covers the same ground in one run
+(`scp scripts/assess.sh infosec@<server>:/tmp/ && sudo bash /tmp/assess.sh /tmp/assessment.txt`)
+and can be re-run after hardening for a diff. Reports stay out of the repository
+(`reports/` is git-ignored): they list users, ports and network details.
 
-Either clone the repository (private: use a read-only deploy key or a fine-grained PAT),
-or copy the single file:
+## 1.2 Findings (2026-09-14)
 
-```bash
-# from your workstation, inside this repository
-scp scripts/assess.sh <admin>@<server>:/tmp/assess.sh
-```
+| Area | Finding | Consequence |
+|------|---------|-------------|
+| OS | RHEL 10.1 (Coughlan), kernel 6.12.0-124.28.1.el10_1, x86_64, VMware guest (`ens33`) | Podman + Quadlet (D-11) |
+| CPU / RAM | 8 cores (Xeon Platinum 8280, 1 thread/core), 15 GiB RAM, 2 GiB swap | Budget: LiteLLM 2 CPU / 6 GiB, Presidio 4 CPU / 6 GiB, PostgreSQL 1 CPU / 1.5 GiB, OS the rest (D-15) |
+| Disk | LVM root 417 GB, 405 GB free; `/tmp` tmpfs 7.7 GB | `/opt/llm-gateway` on root; image archives (~4 GB) must not be unpacked in `/tmp` of a 7.7 GB tmpfs alongside other data |
+| Accounts | `infosec` (uid 1001, wheel) and `devops` both allowed by sshd; both have subordinate id ranges | Decide whether `devops` keeps access (open question) |
+| SSH | port 22, `PermitRootLogin no`, `PasswordAuthentication yes`, keys allowed, `AllowUsers devops infosec` | Password auth to be disabled (docs/02 §2.2) once key login is confirmed |
+| Crypto policy | `DEFAULT:NO-WEAKMAC:NO-SSHWEAKMACS` | Fine, keep |
+| SELinux | **Disabled** | Must be re-enabled before deployment (docs/02 §2.5); the units rely on it |
+| firewalld | installed, **not running** | To be enabled with an explicit inbound policy (docs/02 §2.7) |
+| nftables | 1.1.1 installed, service state unknown | Used for the egress policy (docs/02 §2.8) |
+| Listening | sshd 22; rsyslogd **TCP 514 on all interfaces**; zabbix_agentd 10050; `pmd` UDP+TCP 33221; chronyd 323 (loopback) | rsyslog input listener and `pmd` need explanation (open questions); zabbix is monitoring |
+| Network | `ens33` 10.50.4.68/24, gateway 10.50.4.254, resolvers 10.100.0.1 and 10.100.0.2 | Egress policy resolvers filled in; LAN address for the client-facing port later |
+| Time / audit | chronyd active, auditd active | Keep |
+| Subscription | **Not registered, no dnf repositories** | Podman cannot be installed until a package source exists (docs/03 §3.0) |
+| Egress | ghcr.io, Docker Hub, GitHub, api.anthropic.com, cdn.redhat.com all **time out** | No internet from the host: images, cosign and the repository tree are transferred by scp from the workstation (D-16); provider API access needs a network firewall rule before phase 5 §5.7 |
+| cgroups | `cpu memory pids` delegated to user sessions | CPU and memory quotas work for the rootless service account without any drop-in |
+| Containers | Podman, skopeo, container-selinux, passt not installed | Installed in phase 3 |
+| user namespaces | `user.max_user_namespaces = 62627` | Rootless Podman possible |
 
-## 1.2 Run it as root
+## 1.3 Open questions (answers needed before phase 2 starts)
 
-```bash
-ssh <admin>@<server>
-sudo bash /tmp/assess.sh /tmp/assessment.txt
-```
+1. **Package source.** Register the host with Red Hat (directly or through a proxy), attach
+   it to a Satellite, or use the RHEL 10 installation ISO / an RPM bundle as a local
+   repository? Podman, skopeo, passt and container-selinux come from AppStream.
+2. **SELinux.** It is disabled. Was that a deliberate choice by whoever built the VM? The
+   plan re-enables it (permissive, relabel, then enforcing); confirm before phase 2.
+3. **`pmd` on port 33221** and the **rsyslog listener on 514**: what are they, and are they
+   corporate standard (keep and allow in firewalld) or leftovers (remove)?
+4. **`devops` account**: keep its SSH access or not?
+5. **Admin source network** for the SSH firewall rule, and the **Zabbix server address**
+   for port 10050.
+6. **Provider egress**: who owns the network firewall, and can a rule for the gateway
+   host to `api.anthropic.com:443` (and any other chosen provider) be requested now?
+7. **Workstation OS** (the machine you SSH from): it needs `skopeo`, `cosign` and `scp`
+   to run `scripts/fetch-images.sh`.
 
-Runtime is under a minute. The script only reads; the only network activity is a
-handful of HTTPS HEAD/GET requests to registries and provider APIs (section 11) to learn
-whether egress is open, which we need to know before phase 3.
+## 1.4 Exit criteria
 
-## 1.3 Bring the report back
-
-```bash
-# from your workstation
-scp <admin>@<server>:/tmp/assessment.txt reports/assessment-$(date +%Y%m%d).txt
-```
-
-`reports/` is git-ignored: the report lists users, sudo rules, open ports and key
-locations. Keep it out of the repository; share it in the conversation instead.
-
-## 1.4 What we decide from it
-
-| Report section | Decision it drives |
-|----------------|--------------------|
-| 1 OS / arch | Runtime choice (RHEL 10 -> Podman, DECISIONS.md D-11), amd64 vs arm64 images (all pinned images are multi-arch) |
-| 2 capacity | Presidio analyzer workers (~1 GB RAM each), PostgreSQL `shm_size`, disk for the `pgdata` volume and image cache (plan for at least 10 GB free) |
-| 3 accounts | Which accounts to keep, whether a dedicated admin user exists, a free subordinate id range for the `llmgw` service account |
-| 4 SSH | Key-only auth, root login, allowed users, cipher policy |
-| 5 network | Which interface/IP LiteLLM should bind to (`PublishPort=` in the LiteLLM unit), the host resolvers for the egress policy, whether a proxy is required for egress |
-| 6 firewall | firewalld zone and rules; nftables backend (needed for the egress policy in docs/02 §2.8) |
-| 8 packages | Pending security updates; whether Podman/container-selinux are already installed and at which version |
-| 9 controls | SELinux/AppArmor mode, audit, time sync, sysctl baseline |
-| 10 runtime | Existing containers, quadlets, subuid ranges and lingering users we must not disturb |
-| 11 egress | Confirms the path to `ghcr.io`, Docker Hub, GitHub (cosign, repo clone), Red Hat CDN and provider APIs; if blocked, image transfer must be done out-of-band |
-| 12 ports | Conflicts on 4000/5432/3000 |
-
-## 1.5 Facts already established (2026-09-14)
-
-From the commands run so far on the server:
-
-| Item | Value |
-|------|-------|
-| OS | Red Hat Enterprise Linux 10.1 (Coughlan), kernel 6.12.0-124.28.1.el10_1.x86_64 |
-| Admin account | `infosec` (uid 1001), member of `wheel` |
-| Memory | 15 GiB total, 14 GiB available, 2 GiB swap |
-| Disk | LVM root, 417 GB, 405 GB free (`/opt` and `/home` are on it); `/tmp` is tmpfs (7.7 GB) |
-| Boot | EFI |
-
-Still to collect (read-only), all from the admin account:
-
-```bash
-rpm -q podman netavark aardvark-dns container-selinux passt shadow-utils-subid skopeo nftables firewalld chrony audit
-podman --version 2>/dev/null; getenforce
-sudo ss -tulpn
-ip -br addr; ip route; cat /etc/resolv.conf
-sudo firewall-cmd --state; sudo firewall-cmd --list-all
-sudo sshd -T | grep -Ei '^(port|permitrootlogin|passwordauthentication|pubkeyauthentication|allowusers|kbdinteractiveauthentication) '
-systemctl is-active chronyd auditd firewalld; sudo subscription-manager status; dnf repolist
-cat /etc/subuid /etc/subgid; sysctl user.max_user_namespaces
-```
-
-## 1.6 Exit criteria
-
-- Report reviewed together, findings listed in the next message.
-- `docs/02-hardening.md` items marked as required / not applicable for this host.
-- The LAN address for `PublishPort=` (docs/05 §5.10) and the analyzer `WORKERS` value chosen.
+- Findings reviewed together; the open questions answered.
+- `docs/02-hardening.md` items marked required / already in place / not applicable.

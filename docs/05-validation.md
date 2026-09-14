@@ -5,7 +5,7 @@ admin account or the `llmgw` session; `podman` commands need the `llmgw` session
 (`sudo machinectl shell llmgw@`). Export the master key for the session only:
 
 ```bash
-export MASTER_KEY="$(sudo grep '^LITELLM_MASTER_KEY=' /opt/llm-gateway/env/litellm.env | cut -d= -f2-)"   # as llmgw: without sudo
+export MASTER_KEY="$(sudo grep '^LITELLM_MASTER_KEY=' /opt/llm-gateway/litellm/litellm.env | cut -d= -f2-)"   # as llmgw: without sudo
 export BASE=http://127.0.0.1:4000
 ```
 
@@ -132,9 +132,11 @@ provider credentials.
 
 ## 5.9 Clean up and record
 
-- Remove the `mock-echo` entry from `deploy/litellm/config.yaml`, commit, `git pull` in
-  `/opt/llm-gateway/repo` as `llmgw`, then `systemctl --user restart llmgw-litellm.service`
-  (the file is bind-mounted, so a restart applies it).
+- Remove the `mock-echo` entry from `deploy/opt/litellm/config.yaml` in the repository,
+  commit, `scp` the file to the server and install it as `llmgw`
+  (`sudo install -m 644 -o llmgw -g llmgw /tmp/config.yaml /opt/llm-gateway/litellm/config.yaml`),
+  then `systemctl --user restart llmgw-litellm.service` (the file is bind-mounted, so a
+  restart applies it).
 - Delete the validation key: `POST /key/delete` with `{"keys":["<key>"]}`.
 - Record the results (pass/fail per section, versions, date) in the phase 5 entry of
   `README.md` and any deviations in `DECISIONS.md`.
@@ -143,8 +145,9 @@ provider credentials.
 
 All of 5.1 to 5.7 pass as described; 5.5 proves fail-closed. Then serve the client
 network: change `PublishPort=127.0.0.1:4000:4000` in
-`deploy/quadlet/llmgw-litellm.container` to the LAN address (`<lan-ip>:4000:4000`),
-commit, pull on the server, and
+`deploy/opt/litellm/llmgw-litellm.container` to `10.50.4.68:4000:4000`, commit, `scp`
+the unit to the server and install it over `/opt/llm-gateway/litellm/llmgw-litellm.container`
+(owner `llmgw`), and
 
 ```bash
 llmgw$ systemctl --user daemon-reload && systemctl --user restart llmgw-litellm.service

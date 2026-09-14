@@ -1,4 +1,4 @@
-# Secrets and per-server state: never commit these (they live in /opt/llm-gateway/env)
+# Secrets and per-server state: never commit these (they live under /opt/llm-gateway/<component>/)
 *.env
 !*.env.example
 
@@ -9,3 +9,6 @@ reports/*
 # Local scratch
 *.swp
 .DS_Store
+
+# Image archives produced by scripts/fetch-images.sh (multi-GB, transferred by scp)
+images/

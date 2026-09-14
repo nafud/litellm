@@ -20,11 +20,11 @@ Each entry: what was decided, why, and what it depends on. Amend rather than del
   `docker.io/library/` for PostgreSQL, because Podman does not resolve short names in a
   non-interactive service), and the digests were read from the registries' manifest APIs
   on 2026-09-14. Updating = change tag + digest together on the unit's `Image=` line,
-  then `scripts/verify-images.sh`.
+  then `scripts/fetch-images.sh` on the workstation and `bin/verify-images.sh` on the server.
 
 ## D-02 Signature verification
 LiteLLM signs all `ghcr.io/berriai/*` images with one cosign key. The key is vendored in
-`deploy/cosign/` (provenance in its README). Presidio and PostgreSQL images are not
+`deploy/opt/bin/` (provenance in `COSIGN-KEY.md`). Presidio and PostgreSQL images are not
 verified by signature; integrity relies on the digest pin. Verification runs with the
 cosign binary, not Podman's pull-time policy: see D-13 for why.
 
@@ -124,29 +124,38 @@ Rootless costs: a one-time account setup (subordinate ids, linger) and operating
 stack from a `machinectl shell llmgw@` session. No host IP forwarding, no privileged
 port and no capability is needed, so nothing about the design required rootful.
 
-## D-12 Everything of the deployment lives under /opt/llm-gateway
+## D-12 Everything of the deployment lives under /opt/llm-gateway, one directory per component
 Requirement from the environment owner: LiteLLM and Presidio are mounted in `/opt`.
-FHS reserves `/opt/<package>` for add-on application software, so one tree holds the
-repository checkout (`repo/`, the source of truth), the secrets (`env/`) and the
-PostgreSQL data (`data/postgres`, a bind mount instead of a Podman named volume so the
-data is where the owner expects it). The Quadlet search path
-`~llmgw/.config/containers/systemd` is a symlink into the checkout. Two things stay
-outside `/opt` on purpose: the service account's home (a non-standard home directory
-would need SELinux file-context equivalences) and the image store
-(`~/.local/share/containers`, a cache that `verify-images.sh` recreates; relocating it
-would need `graphroot`/`runroot` in a user `storage.conf` plus a `semanage fcontext -e`
-equivalence per `containers-storage.conf(5)`, for no security gain).
+FHS reserves `/opt/<package>` for add-on application software. Decided 2026-09-14 with
+the owner: a single tree `/opt/llm-gateway/` (one owner, one permission boundary, one
+backup path) with `litellm/`, `presidio/`, `postgres/`, `network/` and `bin/`, each
+holding its unit file(s) next to its configuration, secrets and data, and `storage/` as
+the rootless Podman image store (`graphroot` in `~llmgw/.config/containers/storage.conf`,
+SELinux equivalence to the default location per `containers-storage.conf(5)`; a user
+config that omits `runroot` keeps the default, checked in the containers/storage
+source). PostgreSQL data is a bind mount (`postgres/data`) rather than a named volume so
+it is where the owner expects it. The Quadlet search path
+`~llmgw/.config/containers/systemd/` holds symlinks to the units (allowed by
+`podman-systemd.unit(5)`), created by `bin/link-quadlets.sh`. Only the service account's
+home stays outside `/opt`: a non-standard home would need its own SELinux file-context
+equivalences for no gain.
 
-## D-13 Podman's pull-time signature policy cannot verify LiteLLM's signatures
+## D-13 Signature verification: cosign on the workstation; pins are linux/amd64 manifest digests
 Tested on 2026-09-14 with skopeo against the pinned `litellm-non_root` digest: a
 `sigstoreSigned` policy with the vendored key (and `use-sigstore-attachments: true` in
 `registries.d`) rejects the pull with "A signature was required, but no signature
 exists". Cause: LiteLLM signs the multi-arch image index (tag `sha256-<index>.sig`
 exists), not the `linux/amd64` manifest that a pull selects (no `sha256-<manifest>.sig`),
 and containers/image looks for the signature on the pulled manifest. cosign verifies the
-index digest, which is the digest we pin, so `scripts/verify-images.sh` (pull by digest +
-cosign) stays the enforcement point. Revisit if LiteLLM starts signing per-platform
-manifests (`cosign sign --recursive`).
+index digest. Because the server is offline (D-16), the chain is: on the workstation,
+`scripts/fetch-images.sh` cosign-verifies the index, fetches that index by digest
+(content-addressed, so these are the signed bytes), checks that it lists the pinned
+`linux/amd64` digest, copies exactly that manifest into an OCI archive and checks the
+archive digest; on the server, `bin/verify-images.sh` loads the archives and proves that
+every unit's `Image=repo:tag@amd64-digest` resolves in local storage. The units pin the
+amd64 digest rather than the index because Podman recomputes and matches the digest of
+the loaded manifest, and an archive never carries the index. `bin/images.tsv` records
+both digests per image. Revisit if LiteLLM starts signing per-platform manifests.
 
 ## D-14 Service dependencies
 `llmgw-litellm` `Requires=`+`After=` PostgreSQL (LiteLLM cannot serve without it,
@@ -157,3 +166,37 @@ Presidio restarts (and lets docs/05 §5.5 test fail-closed by stopping the analy
 Database and role names are set in the PostgreSQL unit (`Environment=`) and repeated in
 `DATABASE_URL`; only the password is in the env files, because a systemd `ExecStart`
 cannot safely reference environment variables in the health command.
+
+## D-15 Resource budget as cgroup ceilings
+Owner's requirement: about 6 GiB RAM and 2 cores for LiteLLM, 6 GiB and 4 cores for
+Presidio, on an 8-core / 15 GiB host. Implemented as `MemoryMax=`, `MemorySwapMax=0` and
+`CPUQuota=` in the `[Service]` section of each unit: Quadlet runs the container with
+`--cgroups=split` inside the service's own cgroup, so systemd's limits apply to the
+container and are visible with `systemctl --user show`. Split: LiteLLM 6G / 200 %;
+analyzer 5G / 300 % with three gunicorn workers (one spaCy model per worker, about
+1 GiB each, single-threaded); anonymizer 1G / 100 %; PostgreSQL 1500M / 100 %, leaving
+about 1.5 GiB for the OS. These are ceilings (quotas), chosen over core pinning: quotas
+need only the `cpu memory pids` delegation that RHEL 10's systemd gives user sessions by
+default (confirmed on the host), while pinning would need `cpuset` delegation via a
+`user@.service` drop-in. Reservations (`MemoryLow`) were not added: the host is
+dedicated to this stack, so nothing competes.
+
+## D-16 Offline server: everything arrives by scp from the workstation
+Phase 1 showed no route from the host to any registry, GitHub, Red Hat CDN or provider
+API, and no package repositories. Consequences: (1) the package source is a decision
+for the owner (registration through a proxy, Satellite, or the RHEL ISO); (2) images
+are fetched, cosign-verified and archived on the workstation and loaded on the server
+(D-13), which removes the need for cosign on the server; (3) the deployment tree is
+copied with `scp` and installed in place, and the repository is never cloned on the
+server; (4) the only internet access the design needs from the host is TCP 443 to the
+chosen provider API hosts, to be requested on the network firewall before docs/05 §5.7.
+Verified on 2026-09-14 with Podman: an image loaded from an OCI archive keeps the
+archive's manifest digest and resolves as `name:tag@digest` with `--pull=never`; a
+wrong digest is refused with "image not known".
+
+## D-17 SELinux was found disabled and is re-enabled before deployment
+The host runs with SELinux disabled. The container design relies on it (container_t
+confinement, `:Z` labels, `container-selinux`). Phase 2 re-enables it the way Red Hat
+documents for a previously disabled system: permissive, forced relabel at boot
+(`fixfiles -F onboot`), reboot, watch `ausearch -m AVC` through phases 3 and 4, then
+enforcing. The owner's confirmation is required first (phase 1 open question 2).

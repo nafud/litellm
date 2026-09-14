@@ -45,14 +45,16 @@ Prompt content at each hop, for the input `"Dennis Yurichev"`:
 
 | Component | Image | Notes |
 |-----------|-------|-------|
-| LiteLLM proxy | `ghcr.io/berriai/litellm-non_root:v1.100.1` | non-root (uid 65534), cosign-signed, Prisma toolchain baked in |
-| Presidio analyzer | `ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364` | non-root (uid 1001), spaCy `en_core_web_lg` |
-| Presidio anonymizer | `ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364` | non-root (uid 1001) |
-| PostgreSQL | `docker.io/library/postgres:18.6` | run as uid 999 (host user `llmgw` via keep-id), data at `/opt/llm-gateway/data/postgres` |
+| LiteLLM proxy | `ghcr.io/berriai/litellm-non_root:v1.100.1` | non-root (uid 65534), cosign-signed, 6 GiB / 2 CPUs |
+| Presidio analyzer | `ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364` | non-root (uid 1001), spaCy `en_core_web_lg`, 3 workers, 5 GiB / 3 CPUs |
+| Presidio anonymizer | `ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364` | non-root (uid 1001), 1 GiB / 1 CPU |
+| PostgreSQL | `docker.io/library/postgres:18.6` | uid 999 (host user `llmgw` via keep-id), data at `/opt/llm-gateway/postgres/data`, 1.5 GiB / 1 CPU |
 
-Every image is additionally pinned by digest on the `Image=` line of its unit in
-`deploy/quadlet/`. Runtime: Podman 5 (rootless, Quadlet units under the `llmgw` user's
-systemd manager) on RHEL 10; see DECISIONS.md D-11 for why not Docker.
+Every image is pinned by its `linux/amd64` manifest digest on the `Image=` line of its
+unit; `deploy/opt/bin/images.tsv` maps each pin to the multi-arch index it comes from
+(D-13, D-16). Runtime: Podman 5, rootless, Quadlet units under the `llmgw` user's
+systemd manager, on RHEL 10 (D-11). The server has no internet access: images and files
+travel from the workstation by `scp`.
 Presidio's images moved from `mcr.microsoft.com` to `ghcr.io/data-privacy-stack` in 2026;
 older tutorials still reference the Microsoft registry.
 
@@ -61,10 +63,10 @@ older tutorials still reference the Microsoft registry.
 | # | Phase | Document | Status |
 |---|-------|----------|--------|
 | 0 | Repository and reference material | this file, `DECISIONS.md` | done |
-| 1 | Server assessment (read-only) | `docs/01-server-assessment.md`, `scripts/assess.sh` | **in progress** (§1.5 lists what is known and what is left) |
-| 2 | Host hardening (RHEL 10) | `docs/02-hardening.md`, `deploy/host/` | pending |
-| 3 | Podman, service account, cosign, image verification | `docs/03-podman-install.md`, `scripts/verify-images.sh` | pending |
-| 4 | Deploy the stack (Quadlet) | `docs/04-deploy.md`, `deploy/quadlet/` | pending |
+| 1 | Server assessment (read-only) | `docs/01-server-assessment.md`, `scripts/assess.sh` | done 2026-09-14; open questions in §1.3 |
+| 2 | Host hardening (RHEL 10): SELinux, SSH, firewalld, egress | `docs/02-hardening.md`, `deploy/host/` | **next**, after the §1.3 answers |
+| 3 | Package source, Podman, service account, /opt tree, image transfer | `docs/03-podman-install.md`, `scripts/fetch-images.sh`, `deploy/opt/bin/` | pending |
+| 4 | Deploy the stack (Quadlet) | `docs/04-deploy.md`, `deploy/opt/` | pending |
 | 5 | Validation: health, keys, masking end to end | `docs/05-validation.md` | pending |
 | 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | pending |
 | later | TLS termination, SSO for the admin UI, client onboarding | to be decided after phase 5 | open |
@@ -73,15 +75,17 @@ older tutorials still reference the Microsoft registry.
 
 ```
 deploy/
-  quadlet/                  the stack: one .container unit per service + two .network units,
-                            digest-pinned, hardened (rootless Podman, systemd user manager)
-  litellm/config.yaml       LiteLLM models, guardrail, settings (bind-mounted read-only)
-  env/*.env.example         secret templates (installed to /opt/llm-gateway/env/, never committed)
-  host/                     sshd drop-in, sysctl, audit rules, nftables egress policy
-  cosign/                   vendored LiteLLM image signing key + provenance
+  opt/                      mirror of /opt/llm-gateway on the server (copied with scp)
+    litellm/                llmgw-litellm.container, config.yaml, litellm.env.example
+    presidio/               llmgw-presidio-analyzer.container, llmgw-presidio-anonymizer.container
+    postgres/               llmgw-postgres.container, postgres.env.example
+    network/                llmgw-backend.network (internal), llmgw-egress.network
+    bin/                    images.tsv (pins), litellm-cosign.pub, verify-images.sh, link-quadlets.sh
+  llmgw/storage.conf        ~llmgw/.config/containers/storage.conf (image store under /opt)
+  host/                     sshd drop-in, sysctl, audit rules, nftables egress policy (-> /etc)
 scripts/
-  assess.sh                 read-only host assessment -> reports/
-  verify-images.sh          pull by digest + cosign verify (run as llmgw)
+  assess.sh                 read-only host assessment (server)
+  fetch-images.sh           workstation: cosign + index check + OCI archives for scp
 docs/                       one document per phase
 reports/                    assessment output (git-ignored)
 DECISIONS.md                security decisions and their rationale
@@ -91,17 +95,22 @@ On the server (`/opt` as required, D-12):
 
 ```
 /opt/llm-gateway/                root:llmgw 0750
-  repo/                          this repository, checked out as llmgw (source of truth)
-  env/postgres.env, litellm.env  secrets, llmgw 0600
-  data/postgres/                 PostgreSQL data, llmgw 0700 (uid 999 inside the container)
-/home/llmgw/.config/containers/systemd -> /opt/llm-gateway/repo/deploy/quadlet   (Quadlet search path)
-/home/llmgw/.local/share/containers/   image storage (cache; rebuilt by verify-images.sh)
+  litellm/                       unit, config.yaml, litellm.env (0600)
+  presidio/                      units (stateless; analyzer configuration later)
+  postgres/                      unit, postgres.env (0600), data/ (0700), backups/
+  network/                       the two network units
+  bin/                           scripts, image table, cosign key
+  storage/                       Podman image store of llmgw (graphroot)
+/home/llmgw/.config/containers/systemd/*   symlinks to the units above (Quadlet search path)
+/home/llmgw/.config/containers/storage.conf
 ```
 
 ## Working agreement
 
 - Nothing is applied to the server that is not in this repository first.
-- Secrets (`/opt/llm-gateway/env/*.env`) are never committed; templates are.
-- The server runs a reviewed commit of this repository: change here, commit, `git pull`
-  as `llmgw`, then reload/restart the unit.
+- Secrets (`/opt/llm-gateway/*/*.env`) are created on the server and never committed;
+  templates are.
+- The repository is the log and the source: change a file here, commit, `scp` it to the
+  server, install it in place as `llmgw`, then reload/restart the unit. The server never
+  talks to GitHub.
 - Each phase ends with an explicit verification step before the next one starts.
