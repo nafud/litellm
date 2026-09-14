@@ -1,0 +1,13 @@
+# Secrets and per-server state: never commit these
+deploy/.env
+deploy/litellm.env
+*.env
+!*.env.example
+
+# Assessment reports contain host details (users, ports, keys paths)
+reports/*
+!reports/.gitkeep
+
+# Local scratch
+*.swp
+.DS_Store

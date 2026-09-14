@@ -1,0 +1,144 @@
+# LiteLLM + Presidio + PostgreSQL gateway
+#
+# All images are pinned by tag AND digest. Change both together and re-run
+# scripts/verify-images.sh (see docs/06-operations.md for the update procedure).
+#
+# Network model:
+#   backend (internal: true)  postgres, presidio-analyzer, presidio-anonymizer, litellm
+#                             no route to the internet: PostgreSQL and Presidio can never egress
+#   egress                    litellm only: reaches provider APIs (api.anthropic.com, ...)
+# Only litellm publishes a port, and only on ${LITELLM_BIND_ADDR} (default 127.0.0.1).
+
+name: llm-gateway
+
+x-hardened: &hardened
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  postgres:
+    <<: *hardened
+    image: postgres:18.6@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+    # Run directly as the image's 'postgres' user (uid/gid 999). The entrypoint then
+    # skips its root-only chown/gosu steps, so no capabilities are required at all.
+    # The named volume inherits postgres:postgres ownership from the image.
+    user: "999:999"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in deploy/.env}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in deploy/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+    shm_size: 256m
+    volumes:
+      # PostgreSQL 18 image layout: PGDATA is /var/lib/postgresql/18/docker and the
+      # volume mount point is /var/lib/postgresql (NOT /var/lib/postgresql/data as in <= 17).
+      - pgdata:/var/lib/postgresql
+    networks:
+      - backend
+    healthcheck:
+      # $$ escapes compose interpolation; the variables are expanded inside the container.
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  presidio-analyzer:
+    <<: *hardened
+    image: ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364@sha256:ae8f6f111ac2f04e3fec552f7f80edd0dcbfa2dd69ee1b9e030475be31669885
+    # Image runs as user 'presidio' (uid 1001) and serves gunicorn on $PORT (default 3000).
+    environment:
+      PORT: "3000"
+      # Each worker loads the spaCy en_core_web_lg model (~1 GB RAM per worker).
+      WORKERS: ${PRESIDIO_ANALYZER_WORKERS:-1}
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+  presidio-anonymizer:
+    <<: *hardened
+    image: ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364@sha256:e567013893ebc80994e3799f6f55c86aa1f0b0fadb779571ab346f0ec45365c1
+    environment:
+      PORT: "3000"
+      WORKERS: "1"
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  litellm:
+    <<: *hardened
+    # Non-root variant (runs as uid 65534), same signing key as ghcr.io/berriai/litellm.
+    image: ghcr.io/berriai/litellm-non_root:v1.100.1@sha256:c36f3b27a5a817329e0fcf9c4e3a7bf58b62a5a736ad5352f0a5771c1be58404
+    depends_on:
+      postgres:
+        condition: service_healthy
+      presidio-analyzer:
+        condition: service_healthy
+      presidio-anonymizer:
+        condition: service_healthy
+    # Secrets that only LiteLLM may see: master key, salt key, provider keys, UI login.
+    env_file:
+      - litellm.env
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      # Presidio endpoints, internal network only. Read by the presidio guardrail at startup.
+      PRESIDIO_ANALYZER_API_BASE: "http://presidio-analyzer:3000"
+      PRESIDIO_ANONYMIZER_API_BASE: "http://presidio-anonymizer:3000"
+      # Models and provider keys come from config.yaml + environment only, never from the DB/UI.
+      STORE_MODEL_IN_DB: "False"
+      # Use the writable runtime UI directory of the non-root image.
+      LITELLM_NON_ROOT: "true"
+      # Refuse to start if the schema migration fails (default would log and continue).
+      ENFORCE_PRISMA_MIGRATION_CHECK: "true"
+      LITELLM_LOG: "INFO"
+      # Remove the interactive API docs from the attack surface.
+      NO_DOCS: "True"
+      NO_REDOC: "True"
+      LITELLM_DONT_SHOW_FEEDBACK_BOX: "True"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    tmpfs:
+      - /tmp
+    ports:
+      - "${LITELLM_BIND_ADDR:-127.0.0.1}:4000:4000"
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    networks:
+      - backend
+      - egress
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+networks:
+  backend:
+    internal: true
+  egress: {}
+
+volumes:
+  pgdata: {}

@@ -1,0 +1,89 @@
+# LiteLLM proxy configuration.  Mounted read-only at /app/config.yaml.
+# Verified against litellm 1.100.1 (litellm/proxy/guardrails/guardrail_hooks/presidio.py,
+# litellm/types/guardrails.py).
+
+model_list:
+  # Public model names (left) are what clients request. Provider keys come from the
+  # environment only (litellm.env). Add or remove entries as the org decides.
+  - model_name: claude-opus-5
+    litellm_params:
+      model: anthropic/claude-opus-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: claude-sonnet-5
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: claude-haiku-4-5
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Uncomment once the corresponding key exists in litellm.env.
+  # - model_name: gpt-5.2
+  #   litellm_params:
+  #     model: openai/gpt-5.2
+  #     api_key: os.environ/OPENAI_API_KEY
+  # - model_name: gemini-3-pro
+  #   litellm_params:
+  #     model: gemini/gemini-3-pro-preview
+  #     api_key: os.environ/GEMINI_API_KEY
+
+  # VALIDATION ONLY. Never contacts a provider: LiteLLM returns mock_response as-is.
+  # Used in docs/05-validation.md to prove that PII is masked before the "model" and
+  # restored after it. Delete this entry after validation (see docs/05, last step).
+  - model_name: mock-echo
+    litellm_params:
+      model: openai/mock-echo
+      api_key: "unused"
+      mock_response: "Mock reply. Restored placeholders: <PERSON_1> <EMAIL_ADDRESS_1>"
+
+guardrails:
+  - guardrail_name: presidio-pii
+    litellm_params:
+      guardrail: presidio
+      # Runs before the provider call. Because output_parse_pii is true, LiteLLM
+      # automatically also registers the guardrail on post_call to restore the
+      # original values in the response (streaming included).
+      mode: pre_call
+      # Applies to every request; a request cannot opt out.
+      default_on: true
+      output_parse_pii: true
+      # The stock analyzer image ships only the English spaCy model (en_core_web_lg).
+      presidio_language: en
+      # Entity -> action. MASK replaces with <ENTITY_n>; BLOCK rejects the request.
+      # With this map set, an analyzer failure rejects the request (fail closed)
+      # instead of forwarding unmasked text.
+      pii_entities_config:
+        PERSON: MASK
+        EMAIL_ADDRESS: MASK
+        PHONE_NUMBER: MASK
+        CREDIT_CARD: MASK
+        IBAN_CODE: MASK
+        US_SSN: MASK
+        US_PASSPORT: MASK
+        US_DRIVER_LICENSE: MASK
+        US_BANK_NUMBER: MASK
+        IP_ADDRESS: MASK
+        LOCATION: MASK
+        MEDICAL_LICENSE: MASK
+        CRYPTO: MASK
+      # Analyzer endpoints are taken from PRESIDIO_ANALYZER_API_BASE /
+      # PRESIDIO_ANONYMIZER_API_BASE in the environment (set in docker-compose.yml).
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Models/keys live in this file + env, not in the DB. Matches STORE_MODEL_IN_DB=False.
+  store_model_in_db: false
+  # Spend logs are kept (budgets, per-key accounting, guardrail traces) but the
+  # prompt/response bodies are not written to LiteLLM_SpendLogs.
+  disable_spend_logs: false
+  store_prompts_in_spend_logs: false
+  # Fail closed: without the DB there is no key/budget verification.
+  allow_requests_on_db_unavailable: false
+
+litellm_settings:
+  drop_params: true
+  json_logs: true
+  request_timeout: 600
+  # Never print virtual keys / key metadata into logs.
+  redact_user_api_key_info: true
