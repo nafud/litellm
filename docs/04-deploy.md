@@ -29,7 +29,7 @@ Edit both files (`vi`) and fill in:
 | `postgres/postgres.env` | `POSTGRES_PASSWORD` | generated |
 | `litellm/litellm.env` | `DATABASE_URL` | the line printed above (same password) |
 | `litellm/litellm.env` | `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`, `UI_PASSWORD` | generated |
-| `litellm/litellm.env` | `ANTHROPIC_API_KEY` (and others) | the company's provider keys |
+| `litellm/litellm.env` | provider keys | **none yet**: the provider is chosen after validation (D-19, docs/05 §5.7) |
 
 ```bash
 llmgw$ grep -c REPLACE /opt/llm-gateway/*/*.env      # both must print 0
@@ -124,17 +124,19 @@ sudo ss -tlnp | grep -E ':(5432|3000) ' || echo "postgres/presidio not published
 ```
 
 Egress: from the internal network it must fail; from LiteLLM only TCP 443 is allowed by
-the host policy, and the network firewall decides which hosts answer:
+the host policy (docs/02 §2.8):
 
 ```bash
 llmgw$ podman exec presidio-anonymizer curl -sS --max-time 5 https://ghcr.io/ || echo "no egress from backend network: OK"
 llmgw$ podman exec litellm python3 -c "import socket; socket.create_connection(('1.1.1.1', 80), timeout=5)"   # must time out
 sudo journalctl -k --since -5min | grep llmgw-egress-drop                                                       # one drop logged
-llmgw$ podman exec litellm python3 -c "import urllib.request; print(urllib.request.urlopen('https://api.anthropic.com/', timeout=10).status)"
+llmgw$ podman exec litellm python3 -c "import urllib.request, urllib.error
+try: print(urllib.request.urlopen('https://ghcr.io/v2/', timeout=10).status)
+except urllib.error.HTTPError as e: print(e.code)"                                                   # 401: TCP 443 open
 ```
 
-The last command works only once the network firewall rule for the provider exists; any
-HTTP status proves the path.
+Any HTTP status from the last command proves the TCP 443 path from the container; the
+provider itself is tested in docs/05 §5.7 once chosen.
 
 ## 4.5 Reboot test, then enforcing
 

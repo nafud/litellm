@@ -52,10 +52,11 @@ commit, never an unattended pull.
 
 3. Update the row in `deploy/opt/bin/images.tsv` and the `Image=` line of the unit
    (tag **and** amd64 digest, index digest in the comment). Commit.
-4. `scripts/fetch-images.sh` on the workstation (verifies signature, index, archive and
-   unit consistency), `scp` the archive, `SHA256SUMS` and the changed unit to the server,
-   install the unit over its `/opt/llm-gateway/<component>/` copy as `llmgw`, then
-   `llmgw$ bash /opt/llm-gateway/bin/verify-images.sh /tmp/images`.
+4. `scripts/verify-pins.sh` on the workstation (cosign on the index, index lists the
+   amd64 digest, unit pins it), then `scp` `images.tsv` and the changed unit to the
+   server, install them over their `/opt/llm-gateway/{bin,<component>}/` copies as
+   `llmgw`, then `llmgw$ bash /opt/llm-gateway/bin/pull-images.sh` (pulls the new digest,
+   leaves the old image in place for rollback).
 5. Read the release notes for schema or config changes; take a DB backup (§6.1).
 6. `llmgw$ systemctl --user daemon-reload && systemctl --user restart llmgw-litellm.service`
    (or the unit that changed), then `journalctl --user -f -u llmgw-litellm.service` for

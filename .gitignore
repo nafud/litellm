@@ -10,5 +10,3 @@ reports/*
 *.swp
 .DS_Store
 
-# Image archives produced by scripts/fetch-images.sh (multi-GB, transferred by scp)
-images/

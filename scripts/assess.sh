@@ -185,17 +185,17 @@ section "11. Egress reachability (read-only GET/HEAD, 8s timeout)"
 for u in \
   https://ghcr.io/v2/ \
   https://registry-1.docker.io/v2/ \
+  https://subscription.rhsm.redhat.com/ \
   https://cdn.redhat.com/ \
   https://github.com/ \
   https://api.anthropic.com/ \
   https://api.openai.com/ \
-  https://generativelanguage.googleapis.com/ \
-  https://deb.debian.org/ \
-  https://archive.ubuntu.com/ ; do
+  https://generativelanguage.googleapis.com/ ; do
   code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "$u" 2>/dev/null); code=${code:-000}
   printf '%-48s HTTP %s\n' "$u" "$code"
 done
-runsh "DNS resolution" "for h in ghcr.io api.anthropic.com registry-1.docker.io; do getent hosts \$h || echo \"\$h: NO RESOLUTION\"; done"
+runsh "DNS resolution" "for h in ghcr.io cdn.redhat.com registry-1.docker.io; do getent hosts \$h || echo \"\$h: NO RESOLUTION\"; done"
+runsh "proxy configuration" "env | grep -i proxy; grep -i proxy /etc/dnf/dnf.conf /etc/rhsm/rhsm.conf /etc/environment 2>/dev/null; true"
 
 section "12. Existing PostgreSQL / Python / ports 4000,5432,3000 in use?"
 runsh "postgres processes" "pgrep -a postgres"

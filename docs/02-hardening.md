@@ -84,8 +84,8 @@ is in place (D-10). Cipher and MAC lists come from the crypto policy
 
 ## 2.4 Updates
 
-Depends on the package source chosen in docs/03 §3.0. Once `dnf repolist` shows
-repositories:
+Depends on the package source chosen in docs/03 §3.0 (registration is the expected
+choice now that the host has internet access). Once `dnf repolist` shows repositories:
 
 ```bash
 sudo dnf -y upgrade && sudo reboot            # if a kernel or glibc update was applied
@@ -103,7 +103,7 @@ refresh instead and record it.
 ## 2.5 Time, logging, audit
 
 - `timedatectl` shows `System clock synchronized: yes` (chronyd is active; confirm it
-  reaches its sources: `chronyc sources`, because egress is filtered).
+  reaches its sources: `chronyc sources`).
 - Journal: `journalctl --disk-usage`; container logs go to the journal too
   (`LogDriver=journald`), so cap it: `SystemMaxUse=2G` in
   `/etc/systemd/journald.conf.d/size.conf`, then `sudo systemctl restart systemd-journald`.
@@ -173,10 +173,14 @@ sudo systemctl enable --now nftables
 sudo nft list table inet llmgw_egress
 ```
 
-The network firewall currently blocks every destination from this host. Before phase 5
-§5.7 (real provider call) a rule for `10.50.4.68` to the chosen provider API hosts on
-TCP 443 must exist; nothing else in the deployment needs internet from the host
-(images and tools arrive by `scp`).
+The host has general internet access. This table is what keeps the gateway's own
+traffic within the architecture's "provider APIs only" intent at the host level: the
+service account, and therefore every container, can reach only TCP 443 (plus DNS to
+the two resolvers). Root keeps unrestricted egress for `dnf`, registration and the image
+pulls of docs/03 §3.7 run as `llmgw`, which is TCP 443 as well. Once the provider is
+chosen (D-19), the `tcp dport 443 accept` rule can be narrowed to a named set of the
+provider's addresses, or the network firewall can restrict `10.50.4.68` to those hosts;
+neither is needed to bring the stack up.
 
 ## 2.9 Verification
 

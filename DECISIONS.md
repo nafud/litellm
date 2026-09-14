@@ -20,7 +20,7 @@ Each entry: what was decided, why, and what it depends on. Amend rather than del
   `docker.io/library/` for PostgreSQL, because Podman does not resolve short names in a
   non-interactive service), and the digests were read from the registries' manifest APIs
   on 2026-09-14. Updating = change tag + digest together on the unit's `Image=` line,
-  then `scripts/fetch-images.sh` on the workstation and `bin/verify-images.sh` on the server.
+  then `scripts/verify-pins.sh` on the workstation and `bin/pull-images.sh` on the server (D-18).
 
 ## D-02 Signature verification
 LiteLLM signs all `ghcr.io/berriai/*` images with one cosign key. The key is vendored in
@@ -141,6 +141,9 @@ home stays outside `/opt`: a non-standard home would need its own SELinux file-c
 equivalences for no gain.
 
 ## D-13 Signature verification: cosign on the workstation; pins are linux/amd64 manifest digests
+*Amended by D-18 (2026-09-14): the server now pulls by digest itself; the workstation
+only verifies pins. The reasoning below about what cosign signs is unchanged.*
+
 Tested on 2026-09-14 with skopeo against the pinned `litellm-non_root` digest: a
 `sigstoreSigned` policy with the vendored key (and `use-sigstore-attachments: true` in
 `registries.d`) rejects the pull with "A signature was required, but no signature
@@ -182,6 +185,9 @@ default (confirmed on the host), while pinning would need `cpuset` delegation vi
 dedicated to this stack, so nothing competes.
 
 ## D-16 Offline server: everything arrives by scp from the workstation
+*Superseded by D-18 (2026-09-14): internet access was enabled on the host. Kept as the
+record of the phase 1 situation; the scp path for the deployment tree remains.*
+
 Phase 1 showed no route from the host to any registry, GitHub, Red Hat CDN or provider
 API, and no package repositories. Consequences: (1) the package source is a decision
 for the owner (registration through a proxy, Satellite, or the RHEL ISO); (2) images
@@ -200,3 +206,30 @@ confinement, `:Z` labels, `container-selinux`). Phase 2 re-enables it the way Re
 documents for a previously disabled system: permissive, forced relabel at boot
 (`fixfiles -F onboot`), reboot, watch `ausearch -m AVC` through phases 3 and 4, then
 enforcing. The owner's confirmation is required first (phase 1 open question 2).
+
+## D-18 Online server: images are pulled on the server by pinned digest; cosign at pin time
+Internet access was enabled on the host after phase 1 (owner, 2026-09-14). Packages
+therefore come from Red Hat registration (or the ISO fallback) and images are pulled on
+the server, which removes the OCI-archive transfer of D-16. The trust chain stays the
+one of D-13: `scripts/verify-pins.sh` on the workstation cosign-verifies LiteLLM's
+multi-arch index and checks that the index lists the pinned `linux/amd64` digest,
+whenever a pin is chosen or changed; `bin/pull-images.sh` on the server re-reads the
+index by its pinned digest (content-addressed), checks the amd64 digest again, pulls
+exactly `repository:tag@digest` and proves every unit's `Image=` resolves. cosign is not
+packaged for RHEL, so it is not required on the server; the script uses it if present.
+Verified with Podman on 2026-09-14 against a local registry: a pull of
+`name:tag@digest` is stored without the tag and resolves under that exact reference with
+`--pull=never`; a wrong digest is refused at pull ("manifest unknown") and at lookup
+("image not known"). The deployment tree still travels by `scp` (README working
+agreement: the server never talks to GitHub). The host-level egress policy (D-05, docs/02
+§2.8) is what keeps the service account's traffic to TCP 443 now that the host has
+general internet access.
+
+## D-19 The LLM provider is chosen after the stack is validated
+`api.anthropic.com` in the architecture diagram is an example. No provider key is placed
+on the server and no provider model is configured until docs/05 §5.1 to §5.6 pass with
+the validation-only `mock-echo` model (D-09); the provider decision, its key, the model
+entries and the real round trip are phase 7 (docs/05 §5.7). Consequences: `config.yaml`
+ships only `mock-echo` plus commented examples of the entry shape; `litellm.env` has no
+provider variable yet; the egress rule stays `tcp dport 443` to any address until a
+provider exists to narrow it to.

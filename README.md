@@ -52,9 +52,10 @@ Prompt content at each hop, for the input `"Dennis Yurichev"`:
 
 Every image is pinned by its `linux/amd64` manifest digest on the `Image=` line of its
 unit; `deploy/opt/bin/images.tsv` maps each pin to the multi-arch index it comes from
-(D-13, D-16). Runtime: Podman 5, rootless, Quadlet units under the `llmgw` user's
-systemd manager, on RHEL 10 (D-11). The server has no internet access: images and files
-travel from the workstation by `scp`.
+(D-13, D-18). Runtime: Podman 5, rootless, Quadlet units under the `llmgw` user's
+systemd manager, on RHEL 10 (D-11). Images are pulled on the server by pinned digest;
+the deployment tree travels from the workstation by `scp`. The LLM provider is chosen
+after the stack is validated (D-19); `api.anthropic.com` in the diagram is an example.
 Presidio's images moved from `mcr.microsoft.com` to `ghcr.io/data-privacy-stack` in 2026;
 older tutorials still reference the Microsoft registry.
 
@@ -65,10 +66,11 @@ older tutorials still reference the Microsoft registry.
 | 0 | Repository and reference material | this file, `DECISIONS.md` | done |
 | 1 | Server assessment (read-only) | `docs/01-server-assessment.md`, `scripts/assess.sh` | done 2026-09-14; open questions in §1.3 |
 | 2 | Host hardening (RHEL 10): SELinux, SSH, firewalld, egress | `docs/02-hardening.md`, `deploy/host/` | **next**, after the §1.3 answers |
-| 3 | Package source, Podman, service account, /opt tree, image transfer | `docs/03-podman-install.md`, `scripts/fetch-images.sh`, `deploy/opt/bin/` | pending |
+| 3 | Package source, Podman, service account, /opt tree, images | `docs/03-podman-install.md`, `scripts/verify-pins.sh`, `deploy/opt/bin/` | pending |
 | 4 | Deploy the stack (Quadlet) | `docs/04-deploy.md`, `deploy/opt/` | pending |
-| 5 | Validation: health, keys, masking end to end | `docs/05-validation.md` | pending |
+| 5 | Validation: health, keys, masking end to end (mock model) | `docs/05-validation.md` | pending |
 | 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | pending |
+| 7 | Provider choice, key, real round trip | `docs/05-validation.md` §5.7 | after phase 5 (D-19) |
 | later | TLS termination, SSO for the admin UI, client onboarding | to be decided after phase 5 | open |
 
 ## Repository layout
@@ -80,12 +82,12 @@ deploy/
     presidio/               llmgw-presidio-analyzer.container, llmgw-presidio-anonymizer.container
     postgres/               llmgw-postgres.container, postgres.env.example
     network/                llmgw-backend.network (internal), llmgw-egress.network
-    bin/                    images.tsv (pins), litellm-cosign.pub, verify-images.sh, link-quadlets.sh
+    bin/                    images.tsv (pins), litellm-cosign.pub, pull-images.sh, link-quadlets.sh
   llmgw/storage.conf        ~llmgw/.config/containers/storage.conf (image store under /opt)
   host/                     sshd drop-in, sysctl, audit rules, nftables egress policy (-> /etc)
 scripts/
   assess.sh                 read-only host assessment (server)
-  fetch-images.sh           workstation: cosign + index check + OCI archives for scp
+  verify-pins.sh            workstation: cosign + index check when a pin is chosen or changed
 docs/                       one document per phase
 reports/                    assessment output (git-ignored)
 DECISIONS.md                security decisions and their rationale

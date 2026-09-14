@@ -100,28 +100,39 @@ Save the returned `key` (`sk-...`). Then, with that key:
 - a request to `claude-opus-5` is refused (not in the key's model list);
 - `GET /key/info?key=<key>` with the master key shows the alias, budget and spend.
 
-## 5.7 Real provider round trip
+## 5.7 Real provider round trip (phase 7, after the provider is chosen)
 
-Only after 5.1 to 5.6 pass, with the virtual key from 5.6:
+The provider and its key are decided only once 5.1 to 5.6 pass and the stack is judged
+sound (D-19). Until then `model_list` holds only `mock-echo` and no provider key exists
+on the server. Phase 7 then consists of:
 
-```bash
-curl -sS $BASE/v1/chat/completions \
-  -H "Authorization: Bearer <virtual-key>" -H "Content-Type: application/json" \
-  -d '{"model":"claude-sonnet-5","messages":[{"role":"user","content":"Reply with exactly the text between the quotes: \"Hello Dennis Yurichev\""}]}'
-```
+1. Add the model entries to `deploy/opt/litellm/config.yaml` (the commented examples show
+   the shape: `model_name` as clients will call it, `litellm_params.model` in LiteLLM's
+   `<provider>/<model>` form, `api_key: os.environ/<VAR>`), commit, `scp` and install
+   the file as `llmgw` (docs/06 §6.5).
+2. Put the key in `/opt/llm-gateway/litellm/litellm.env` (mode 0600, `llmgw`), restart
+   `llmgw-litellm.service`, confirm `/v1/models` lists the new names.
+3. Issue a virtual key limited to the new model (like 5.6) and send, through it, a prompt
+   containing a name:
 
-The reply must contain `Hello Dennis Yurichev` (restored), while the provider only
-received `Hello <PERSON_1>`. To see that from LiteLLM's side, the spend log row for the
-request records which guardrail ran and how many entities were masked, without the
-prompt body:
+   ```bash
+   curl -sS $BASE/v1/chat/completions \
+     -H "Authorization: Bearer <virtual-key>" -H "Content-Type: application/json" \
+     -d '{"model":"<public-model-name>","messages":[{"role":"user","content":"Reply with exactly the text between the quotes: \"Hello Dennis Yurichev\""}]}'
+   ```
 
-```bash
-llmgw$ podman exec postgres psql -U litellm -d litellm -c \
-  "select request_id, model, spend, metadata->'applied_guardrails' as guardrails, metadata->'guardrail_information' as info from \"LiteLLM_SpendLogs\" order by \"startTime\" desc limit 3;"
-```
+   The reply must contain `Hello Dennis Yurichev` (restored), while the provider only
+   received `Hello <PERSON_1>`. From LiteLLM's side, the spend log row records which
+   guardrail ran and how many entities were masked, without the prompt body:
 
-Confirm the `messages` and `response` columns of the same rows are empty objects
-(`store_prompts_in_spend_logs: false`).
+   ```bash
+   llmgw$ podman exec postgres psql -U litellm -d litellm -c \
+     "select request_id, model, spend, metadata->'applied_guardrails' as guardrails, metadata->'guardrail_information' as info from \"LiteLLM_SpendLogs\" order by \"startTime\" desc limit 3;"
+   ```
+
+   Confirm the `messages` and `response` columns of the same rows are empty objects
+   (`store_prompts_in_spend_logs: false`).
+4. Optionally narrow the egress rule to the provider's addresses (docs/02 §2.8).
 
 ## 5.8 Admin UI
 

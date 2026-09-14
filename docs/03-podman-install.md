@@ -1,22 +1,59 @@
-# Phase 3: Podman, service account, /opt tree, image transfer
+# Phase 3: Podman, service account, /opt tree, images
 
-The gateway host has no internet access and no package repositories (phase 1). This
-phase therefore has two sides: the **workstation** (internet, `scp` to the server) and
-the **server**. Runtime rationale: D-11; transfer design: D-16.
+The gateway host has internet access (confirmed after phase 1, see docs/01 §1.4) but
+no package repositories yet. Packages and images are therefore fetched **on the
+server**; the deployment tree still comes from the repository checkout on the
+workstation by `scp` (the server never talks to GitHub, working agreement in README).
+Runtime rationale: D-11; image trust chain: D-13 and D-18.
 
 ## 3.0 Prerequisite: a package source on the server
 
 `dnf` currently has no repositories (`Not registered`, `No repositories available`).
-One of these must be in place first; the choice is the phase 1 open question 1:
+With internet access the normal path is registration with Red Hat; the ISO remains the
+fallback if no subscription is available (phase 1 open question 1 decides).
 
-| Option | What it needs | Result |
-|--------|---------------|--------|
-| Red Hat registration | outbound HTTPS to `subscription.rhsm.redhat.com` and `cdn.redhat.com`, directly or via a proxy (`subscription-manager config --server.proxy_hostname=... --server.proxy_port=...`) | BaseOS + AppStream, updates keep flowing |
-| Satellite / Capsule | the internal Satellite host reachable, its CA and activation key | same, through the internal server |
-| RHEL 10.1 installation ISO | the ISO copied to the server (`scp`) and mounted; two `.repo` entries pointing at `BaseOS` and `AppStream` on the mount | one-time install, no updates until repeated with a newer ISO |
+**Option A: register with Red Hat** (needs a Red Hat account or an activation key from
+the customer portal; RHEL 10 uses Simple Content Access, so no `attach` step):
+
+```bash
+sudo subscription-manager register --username <portal-user>            # prompts for the password
+# or, with an activation key:
+sudo subscription-manager register --org <org-id> --activationkey <key-name>
+sudo subscription-manager status                                        # Overall Status: Registered (or Disabled, with SCA)
+sudo dnf repolist                                                       # rhel-10-for-x86_64-baseos-rpms, rhel-10-for-x86_64-appstream-rpms
+```
+
+If the host reaches the internet through an HTTP proxy (docs/01 §1.4 tells), set it for
+both tools before registering, otherwise skip this block:
+
+```bash
+sudo subscription-manager config --server.proxy_hostname=<proxy> --server.proxy_port=<port>
+echo 'proxy=http://<proxy>:<port>' | sudo tee -a /etc/dnf/dnf.conf
+```
+
+**Option B: RHEL 10.1 installation ISO as a local repository** (no updates until
+repeated with a newer ISO; docs/02 §2.4 then needs a manual monthly refresh):
+
+```bash
+sudo mkdir -p /mnt/rhel10 && sudo mount -o ro,loop /path/to/rhel-10.1-x86_64-dvd.iso /mnt/rhel10
+sudo tee /etc/yum.repos.d/rhel10-iso.repo >/dev/null <<'EOT'
+[rhel10-iso-baseos]
+name=RHEL 10.1 ISO BaseOS
+baseurl=file:///mnt/rhel10/BaseOS
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+[rhel10-iso-appstream]
+name=RHEL 10.1 ISO AppStream
+baseurl=file:///mnt/rhel10/AppStream
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+EOT
+sudo dnf repolist
+```
 
 Podman, skopeo, passt, container-selinux and systemd-container are all in AppStream.
-Commands for the chosen option are added here once decided.
 
 ## 3.1 Packages (server)
 
@@ -112,34 +149,28 @@ podman info --format 'rootless={{.Host.Security.Rootless}} selinux={{.Host.Secur
 Expected: `rootless=true selinux=true backend=netavark runtime=crun graphroot=/opt/llm-gateway/storage`.
 Commands written as `llmgw$` below run in this session.
 
-## 3.7 Images: fetch and verify on the workstation, load and verify on the server
+## 3.7 Images: pull by pinned digest on the server
 
-**Workstation** (needs `skopeo`, `cosign`, `python3`; install commands depend on its OS,
-phase 1 question 7):
+Every unit pins `Image=repository:tag@sha256:<linux/amd64 manifest digest>` with
+`Pull=never`; `bin/images.tsv` records, per image, the multi-arch index digest the pin
+was taken from. The LiteLLM index was cosign-verified with the vendored key when the
+pins were chosen (`scripts/verify-pins.sh` on the workstation, D-18); on the server the
+pull is by digest, so Podman itself rejects any manifest that does not hash to the pin.
 
-```bash
-scripts/fetch-images.sh            # writes images/*.tar and images/SHA256SUMS
-```
-
-For each of the four images the script: cosign-verifies the multi-arch index with the
-vendored key (LiteLLM only, the other projects do not sign), reads that index from the
-registry and checks it lists the pinned `linux/amd64` digest, copies exactly that
-manifest into an OCI archive, checks the archive's digest equals the pin, and checks the
-units pin the same value. Expect `RESULT: archives in ... verified`. Then:
-
-```bash
-scp images/*.tar images/SHA256SUMS infosec@10.50.4.68:/tmp/images/
-```
-
-About 4 GB in total; `/tmp` on the server is a 7.7 GB tmpfs, so copy, load, delete.
+If the host uses an HTTP proxy, Podman needs it in the service account's environment
+(`https_proxy` in `~llmgw/.config/environment.d/proxy.conf`, written as `llmgw`; this
+also reaches the Quadlet services). Without a proxy, nothing to do.
 
 **Server**, as `llmgw`:
 
 ```bash
-llmgw$ bash /opt/llm-gateway/bin/verify-images.sh /tmp/images
+llmgw$ bash /opt/llm-gateway/bin/pull-images.sh
 ```
 
-Expected ending:
+For each of the four images the script reads the index from the registry by its pinned
+digest, checks that it lists the pinned `linux/amd64` digest, pulls exactly
+`repository:tag@digest` (the string the unit uses), and finally checks every `Image=`
+line resolves in local storage. Expected ending:
 
 ```
 OK       ghcr.io/berriai/litellm-non_root:v1.100.1@sha256:833abd...
@@ -149,10 +180,11 @@ OK       ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364@sha256:65a9f96c.
 RESULT: every unit's Image= resolves in local storage by digest.
 ```
 
-Then `sudo rm -rf /tmp/images`. Why this chain is sound: the digest in each unit is the
-`linux/amd64` manifest digest, which Podman recomputes from the loaded bytes and matches
-against `Image=` with `Pull=never` (verified with Podman on 2026-09-14, D-16); the
-workstation proved that this digest is the one listed by the cosign-signed index.
+About 4 GB lands in `/opt/llm-gateway/storage`. Docker Hub (PostgreSQL) allows
+anonymous pulls at a limited rate; one pull is far below it. Verified with Podman on
+2026-09-14 (D-18): an image pulled as `name:tag@digest` is stored without the tag and
+resolves under that exact reference with `--pull=never`; a wrong digest is refused at
+pull ("manifest unknown") and at lookup ("image not known").
 
 ## 3.8 Egress policy (server)
 
@@ -163,5 +195,5 @@ Now that `llmgw` exists, apply docs/02 §2.8.
 - `podman info` as `llmgw` reports rootless, SELinux enabled, netavark, crun, graphroot under `/opt`.
 - `llmgw` has subordinate id ranges and lingering enabled.
 - `/opt/llm-gateway/*` exists with the ownership and modes of §3.3.
-- `verify-images.sh` ends with `RESULT: every unit's Image= resolves ...`.
+- `pull-images.sh` ends with `RESULT: every unit's Image= resolves ...`.
 - `sudo nft list table inet llmgw_egress` is loaded; `sudo ausearch -m AVC -ts recent` shows no denials.
