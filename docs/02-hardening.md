@@ -8,12 +8,15 @@ for this phase, `scp -r deploy/host infosec@10.50.4.68:/tmp/host` is enough).
 
 Order matters: SELinux first (it needs a reboot and a relabel), then SSH, then firewalls.
 
-Two facts from docs/01 §1.7 frame this phase. The host is managed by Ansible through
-the `devops` account: before changing `sshd_config`, `rsyslog.conf` or firewalld, know
-whether a playbook owns the file (docs/01 §1.8 block B), and have the change made in
-the playbook when it does, otherwise the next run reverts it. And the Cortex XDR agent
-(`traps_pmd.service`, `/opt/traps`) is never stopped, modified or excluded from the
-relabel; it supports SELinux enforcing on RHEL.
+Three facts from docs/01 §1.7 and §1.9 frame this phase. The infrastructure team ran
+the CIS build kit on this host from the `devops` account (October 2025 and January
+2026), so some settings this phase touches already exist in a CIS form: inventory them
+first (docs/01 §1.10 block A) and add to what is there rather than duplicating it; the
+CIS-CAT report of 2026-01-13 is the baseline to compare against. Nothing under `/etc`
+is Ansible-managed, but tell the `devops` team what phase 2 changes so a future kit or
+playbook run does not revert it. And the Cortex XDR agent (`traps_pmd.service`,
+`/opt/traps`) is never stopped, modified or excluded from the relabel; it supports
+SELinux enforcing on RHEL.
 
 ## 2.0 Hostname
 

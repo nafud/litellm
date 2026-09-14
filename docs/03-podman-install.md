@@ -19,8 +19,13 @@ Red Hat hosts, and `cdn.redhat.com` authenticates clients with certificates).
 (the `devops` team): the organisation name and an activation key whose content view
 carries RHEL 10 BaseOS and AppStream. The hostname must be set first (docs/02 §2.0).
 
+The host's previous record was deleted on the Satellite (rhsm log: `410 Gone`, docs/01
+§1.9), so the local identity is stale; `clean` removes it (consumer certificate, cached
+entitlements and facts, nothing else) before a fresh registration:
+
 ```bash
 grep -E '^(hostname|prefix|baseurl)\s*=' /etc/rhsm/rhsm.conf         # capsule.xalqbank.az, /rhsm, https://capsule.xalqbank.az/pulp/content
+sudo subscription-manager clean
 sudo subscription-manager register --org="<organisation>" --activationkey="<key>"
 sudo subscription-manager identity                                     # system identity, org name
 sudo subscription-manager repos --list-enabled | grep -E '^Repo ID'   # rhel-10-for-x86_64-baseos-rpms, rhel-10-for-x86_64-appstream-rpms

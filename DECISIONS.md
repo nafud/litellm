@@ -228,6 +228,9 @@ whenever a pin is chosen or changed; `bin/pull-images.sh` on the server re-reads
 index by its pinned digest (content-addressed), checks the amd64 digest again, pulls
 exactly `repository:tag@digest` and proves every unit's `Image=` resolves. cosign is not
 packaged for RHEL, so it is not required on the server; the script uses it if present.
+Confirmed on the host on 2026-09-14: manifests from `ghcr.io` and `registry-1.docker.io`
+and layers from `pkg-containers.githubusercontent.com` and
+`production.cloudfront.docker.com` all pass with valid TLS (docs/01 §1.9).
 Verified with Podman on 2026-09-14 against a local registry: a pull of
 `name:tag@digest` is stored without the tag and resolves under that exact reference with
 `--pull=never`; a wrong digest is refused at pull ("manifest unknown") and at lookup

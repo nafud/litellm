@@ -50,11 +50,11 @@ and can be re-run after hardening for a diff. Reports stay out of the repository
    listener on 514**: it is a receiver with no clients next to the SIEM forwarder; remove
    the two listener lines, or keep them if the SIEM team says the host is meant to relay.
    Is `/etc/rsyslog.conf` managed by the Ansible playbooks (§1.8 block B tells)?
-4. **`devops` account**: it is the Ansible automation account (§1.7). Keeping it is the
-   likely answer; the real question is what its playbooks manage on this host (§1.8
-   block B), because a playbook that rewrites `sshd_config`, `rsyslog.conf` or firewalld
-   would undo phase 2. Its `NOPASSWD:ALL` sudo and password login stay as the team's
-   standard unless you decide otherwise.
+4. **`devops` account**: the infrastructure team's admin account, used for the XDR
+   agent and the CIS build kit; Ansible connected once and nothing under `/etc` is
+   playbook-managed (§1.9). Keeping it is the likely answer. Its `NOPASSWD:ALL` sudo and
+   password login stay as the team's standard unless you decide otherwise; phase 2 tells
+   the team what changed so a future CIS or Ansible run does not revert it.
 5. **Zabbix server**: answered, `Server=10.100.7.150` (passive checks; `ServerActive` is
    loopback, so no outbound). **Admin source networks**: logins came from 10.240.234.19
    (you, now), 10.50.12.2 (you), 10.100.8.50 and 10.100.7.60 (`devops`). Name the
@@ -296,3 +296,55 @@ Shows the agent version and whether 33221 is bound to loopback or to all address
 
 - Findings reviewed together; the open questions answered.
 - `docs/02-hardening.md` items marked required / already in place / not applicable.
+
+## 1.9 Results of the second round (2026-09-14)
+
+| Item | Result | Consequence |
+|------|--------|-------------|
+| Image layer hosts | `pkg-containers.githubusercontent.com` and `production.cloudfront.docker.com` both HTTP 200 with valid TLS | The pull path is fully open; docs/03 §3.7 needs nothing more |
+| Ansible | No "Ansible managed" file under `/etc` (the two hits are Insights and SELinux context files); no `sudo` use by `devops` in the journal; `~devops/.ansible` created once on 2026-01-07 | The host is not under continuous configuration management; a playbook reverting phase 2 is unlikely, but the `devops` team should be told what changes |
+| `devops` home | `CIS-LBK/` (CIS Linux Build Kit, 2025-10-14), the RHEL 10 CIS Benchmark build kit tarball and `cortex-8.9.tar.gz` (2026-01-07), a CIS-CAT report `localhost-CIS_Red_Hat_Enterprise_Linux_10_Benchmark-20260113T171547Z.html` (2026-01-13) | `devops` is the infrastructure team's admin account, used to deploy the XDR agent and to run CIS hardening; the crypto policy `NO-WEAKMAC:NO-SSHWEAKMACS` and other settings probably come from that kit. Phase 2 must inventory what the kit already changed (§1.10 block A) and the CIS report tells the current posture |
+| rhsm log | Today at 10:57, 12:10 and 12:28: `HTTP error (410 - Gone): Unit 0066fa1f-... has been deleted` | The host was registered to the Satellite and its record was deleted on the Satellite side (a `localhost` entry is an obvious cleanup candidate). Local rhsm state is stale: `subscription-manager clean` before re-registering (docs/03 §3.0) |
+| Capsule | `rhsm.conf` points at `capsule.xalqbank.az` (10.100.8.203, prefix `/rhsm`, content at `/pulp/content`); capsule CA installed 2026-01-07; `/rhsm/` answers 200 with the katello CA; `redhat.repo` empty | Registration path intact; repositories appear once registered |
+| Hostname, key | static hostname `localhost`; no `~infosec/.ssh/authorized_keys` | Questions 8 and 9 confirmed |
+| Cortex XDR | `cytool info` is not a command; 33221 is bound on `0.0.0.0` for UDP and TCP (TCP backlog 2) | Whether anything must reach 33221 from outside is a question for the XDR administrators; §1.10 block C shows the agent's own outbound connection |
+
+## 1.10 Third round of read-only checks
+
+**A. What the CIS build kit already changed (needed before docs/02 §2.3, §2.5, §2.6)**
+
+```bash
+ls -la /etc/sysctl.d/ /etc/ssh/sshd_config.d/ /etc/audit/rules.d/ /etc/modprobe.d/ /etc/security/limits.d/ 2>&1
+sudo grep -vE '^\s*(#|$)' /etc/ssh/sshd_config
+sudo grep -rvhE '^\s*(#|$)' /etc/sysctl.d/ 2>/dev/null | sort | uniq | head -60
+sudo auditctl -l 2>&1 | head -40; sudo ls -l /etc/audit/rules.d/
+sudo find /var/log /home/devops/CIS-LBK -maxdepth 3 -iname '*lbk*' -o -maxdepth 3 -iname '*cis*log*' 2>/dev/null | head
+sudo grep -E "^> " /home/devops/.viminfo | head -20          # files devops edited by hand
+sudo cat /home/devops/.bash_history                          # 166 bytes, today: what was done at the reboot
+```
+
+The CIS-CAT report is the current posture in one file. Copy it out to read it in a
+browser (the `cp` is the only write, into `/tmp`):
+
+```bash
+sudo cp /home/devops/localhost-CIS_Red_Hat_Enterprise_Linux_10_Benchmark-20260113T171547Z.html /tmp/cis-report.html && sudo chown infosec /tmp/cis-report.html
+# workstation:  scp infosec@10.50.4.68:/tmp/cis-report.html .   then open it; afterwards rm /tmp/cis-report.html on the server
+```
+
+**B. Journal persistence (decides how far back the `sudo` evidence goes)**
+
+```bash
+ls -ld /var/log/journal 2>&1; journalctl --list-boots | head -3; journalctl --disk-usage
+```
+
+**C. Cortex XDR: outbound only?**
+
+```bash
+sudo ss -tnpH state established | grep pmd
+sudo journalctl -u traps_pmd.service --since today | tail -5
+sudo /opt/traps/bin/cytool -h 2>&1 | grep -iE 'checkin|runtime|status|version|last'
+```
+
+An established connection from `pmd` to a Palo Alto address on 443 shows the agent
+talks outbound; then no inbound rule is required on 33221, subject to the XDR
+administrators' confirmation.
