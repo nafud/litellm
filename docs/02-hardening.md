@@ -31,22 +31,23 @@ hostnamectl; hostname -f
 ## 2.1 SELinux: re-enable (currently Disabled)
 
 The whole container design depends on SELinux: container-selinux confines every
-container to `container_t`, and the units label their bind mounts with `:Z`. First find
-out how it was disabled:
+container to `container_t`, and the units label their bind mounts with `:Z`. How it was
+disabled is known (docs/01 §1.7, §1.11): `SELINUX=disabled` written by hand from the
+`devops` account on 2026-01-07, no kernel argument, files created since unlabeled. Tell
+the `devops` team it is being re-enabled, and ask why it was turned off (if it was for
+the XDR agent or the CIS kit, neither needs it off).
 
-```bash
-grep -E '^SELINUX=' /etc/selinux/config
-grep -o 'selinux=0\|enforcing=0' /proc/cmdline || echo "no kernel argument"
-rpm -q selinux-policy-targeted policycoreutils
-```
-
-Then the Red Hat procedure for a system that has been running without SELinux: go to
+The Red Hat procedure for a system that has been running without SELinux: go to
 **permissive** first, force a full relabel at the next boot, reboot, look for denials,
-then switch to enforcing.
+then switch to enforcing. Because the CIS audit configuration is immutable (`-e 2`),
+the audit rules of §2.5 are installed before this same reboot so both take effect
+together:
 
 ```bash
+sudo install -m 640 -o root -g root /tmp/host/llm-gateway.rules /etc/audit/rules.d/llm-gateway.rules
+sudo chown root:root /etc/audit/rules.d/*.rules && sudo chmod 640 /etc/audit/rules.d/*.rules   # CIS files are owned by devops (docs/01 §1.11)
 sudo sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
-sudo grubby --update-kernel=ALL --remove-args="selinux=0 enforcing=0"   # only if /proc/cmdline showed them
+grep -E '^SELINUX=' /etc/selinux/config                                  # SELINUX=permissive
 sudo fixfiles -F onboot            # creates /.autorelabel; the relabel runs during the next boot
 sudo reboot
 ```
@@ -55,7 +56,10 @@ After the reboot (the relabel of a 400 GB volume with little data takes a few mi
 
 ```bash
 getenforce                          # Permissive
+ls -Z /etc/passwd /opt /home/infosec                # labels instead of "?"
 sudo ausearch -m AVC,USER_AVC -ts boot | tail -20   # denials since boot; expect none or only noise
+sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'   # 10: the new rules loaded
+sudo /opt/traps/bin/cytool status | head -5          # XDR agent still healthy
 ```
 
 Leave it permissive while phase 3 installs Podman and phase 4 starts the stack, checking
@@ -94,13 +98,21 @@ ssh-copy-id infosec@10.50.4.68
 ssh -o PasswordAuthentication=no infosec@10.50.4.68 true && echo "key login OK"
 ```
 
-Then, on the server:
+Then, on the server. The CIS Build Kit already wrote most of the hardening into
+`/etc/ssh/sshd_config` above the `Include` line, where it wins over every drop-in
+(docs/01 §1.11); the drop-in only adds what CIS did not set (password and keyboard
+authentication off, no X11 or agent forwarding, local TCP forwarding only):
 
 ```bash
-sudo install -m 644 -o root -g root /tmp/host/10-sshd-hardening.conf /etc/ssh/sshd_config.d/10-sshd-hardening.conf
+sudo ls -la /etc/ssh/sshd_config.d/                 # existing drop-ins (50-redhat.conf is RHEL's)
+sudo install -m 600 -o root -g root /tmp/host/10-sshd-hardening.conf /etc/ssh/sshd_config.d/10-sshd-hardening.conf
 sudo sshd -t && sudo systemctl reload sshd
-sudo sshd -T | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|allowusers|allowtcpforwarding) '
+sudo sshd -T | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|x11forwarding|allowagentforwarding|allowtcpforwarding|maxauthtries|allowusers) '
 ```
+
+Expected: `passwordauthentication no`, `kbdinteractiveauthentication no`,
+`x11forwarding no`, `allowagentforwarding no`, `allowtcpforwarding local`,
+`maxauthtries 4` (CIS value, kept), `allowusers devops infosec`.
 
 Open a **new** session to confirm before closing the old one. `AllowTcpForwarding local`
 stays on because the admin UI is reached through `ssh -L 4000:127.0.0.1:4000` until TLS
@@ -129,9 +141,19 @@ refresh instead and record it.
 
 - `timedatectl` shows `System clock synchronized: yes` (chronyd is active; confirm it
   reaches its sources: `chronyc sources`).
-- Journal: `journalctl --disk-usage`; container logs go to the journal too
-  (`LogDriver=journald`), so cap it: `SystemMaxUse=2G` in
-  `/etc/systemd/journald.conf.d/size.conf`, then `sudo systemctl restart systemd-journald`.
+- Journal: it is volatile on this host (`/var/log/journal` does not exist, docs/01
+  §1.11), so every reboot discards it. Container logs go to the journal
+  (`LogDriver=journald`) and so do the `llmgw` user's units; make it persistent and
+  capped:
+
+```bash
+sudo install -d -m 755 -o root -g root /etc/systemd/journald.conf.d
+printf '[Journal]\nStorage=persistent\nSystemMaxUse=2G\n' | sudo tee /etc/systemd/journald.conf.d/llm-gateway.conf
+sudo mkdir -p /var/log/journal && sudo systemd-tmpfiles --create --prefix /var/log/journal
+sudo systemctl restart systemd-journald && journalctl --disk-usage && ls -ld /var/log/journal
+```
+
+  rsyslog keeps forwarding to the SIEM through `imjournal` regardless.
 - rsyslog forwards everything to the SIEM (`*.* @@linux-mon.xalqbank.az`) and ships
   `audit.log` through `imfile`; both stay, and container logs reach the SIEM through
   `imjournal`. It also runs an unused receiver (`$ModLoad imtcp`,
@@ -139,24 +161,35 @@ refresh instead and record it.
   two lines (in the playbook if Ansible owns the file, docs/01 §1.8 block B), then
   `sudo rsyslogd -N1 && sudo systemctl restart rsyslog` and confirm `ss -tlnp` no longer
   shows 514. If it stays, restrict the source in firewalld (§2.7).
-- Audit rules for the files that decide who can log in, who is root and what the gateway runs:
+- Audit: the CIS rule set is in place (`50-*.rules`, `privileged.rules`, docs/01
+  §1.11) and ends with `-e 2`, so the configuration is immutable until reboot;
+  `augenrules --load` cannot add rules at runtime. The gateway rules and the ownership
+  fix (the CIS files are owned by `devops`, which lets that account change audit rules
+  without `sudo`) are therefore part of the §2.1 reboot. Verify afterwards:
 
 ```bash
-sudo install -m 640 -o root -g root /tmp/host/llm-gateway.rules /etc/audit/rules.d/llm-gateway.rules
-sudo augenrules --load && sudo auditctl -l | grep -c -E 'sshd|sudo|subid|containers|firewall|gateway'
+sudo auditctl -s | grep -E '^(enabled|pid|lost)'     # enabled 2
+sudo auditctl -l | grep -E 'gateway|firewall|subid'
+stat -c '%U:%G %a %n' /etc/audit/rules.d/*.rules      # root:root 640
 ```
 
 ## 2.6 Kernel parameters
 
+The CIS Build Kit already installed `/etc/sysctl.d/60-{fs,ipv4,ipv6,kernel}_sysctl.conf`
+(docs/01 §1.11). `90-hardening.conf` adds only the missing keys (`kptr_restrict`,
+`unprivileged_bpf_disabled`, `fs.protected_*`, `default.rp_filter`):
+
 ```bash
 sudo install -m 644 -o root -g root /tmp/host/90-hardening.conf /etc/sysctl.d/90-hardening.conf
-sudo sysctl --system | grep -E 'rp_filter|accept_redirects|kptr_restrict|ptrace_scope'
-sysctl user.max_user_namespaces net.ipv4.ip_unprivileged_port_start   # 62627 and 1024 on this host
+sudo sysctl --system | grep -E 'kptr_restrict|protected_regular|default.rp_filter|unprivileged_bpf'
+sysctl user.max_user_namespaces net.ipv4.ip_unprivileged_port_start net.ipv4.conf.all.forwarding   # 62627, 1024, 0
 ```
 
-`ip_forward` is left at the RHEL default: rootless Podman networks live in the service
-account's own network namespace and do not route through the host. Port 4000 is above
-the unprivileged-port boundary, so nothing changes there either.
+Forwarding stays off (CIS sets it, and rootless Podman networks live in the service
+account's own network namespace, not routed through the host). Port 4000 is above the
+unprivileged-port boundary, so nothing changes there either. The CIS module blacklists
+(`sctp`, `tipc`, `can`, `l2tp*`, `usb-storage`) do not touch anything Podman needs
+(`overlay`, `bridge`, `veth`, `tun` are not in them).
 
 ## 2.7 Inbound: firewalld (currently not running)
 

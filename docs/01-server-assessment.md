@@ -348,3 +348,30 @@ sudo /opt/traps/bin/cytool -h 2>&1 | grep -iE 'checkin|runtime|status|version|la
 An established connection from `pmd` to a Palo Alto address on 443 shows the agent
 talks outbound; then no inbound rule is required on 33221, subject to the XDR
 administrators' confirmation.
+
+## 1.11 Results of the third round (2026-09-14)
+
+| Item | Result | Consequence |
+|------|--------|-------------|
+| CIS Build Kit, sshd | Remediation lines in `/etc/ssh/sshd_config` **above** the `Include sshd_config.d` line: `PermitRootLogin no`, `MaxAuthTries 4`, `LoginGraceTime 60`, `ClientAliveInterval 15` / `CountMax 3`, `LogLevel VERBOSE`, `MaxStartups`, `MaxSessions 10`, `PermitEmptyPasswords no`, `PermitUserEnvironment no`, `HostbasedAuthentication no`, `IgnoreRhosts yes`, `Banner /etc/issue.net`, `AllowUsers`/`AllowGroups devops infosec`, `DenyUsers`/`DenyGroups root` | sshd keeps the first value read, so these cannot be changed by a drop-in; `deploy/host/10-sshd-hardening.conf` was reduced to what CIS did not set (password and keyboard-interactive off, no X11/agent forwarding, local TCP forwarding) |
+| CIS, sysctl | `/etc/sysctl.d/60-{fs,ipv4,ipv6,kernel}_sysctl.conf` (2026-01-07): dumpable, dmesg, ASLR, ptrace, redirects, source routing, forwarding off, martians, rp_filter, syncookies, IPv6 RA | `deploy/host/90-hardening.conf` reduced to the missing keys |
+| CIS, modules | blacklists for `sctp`, `tipc`, `can`, `l2tp*`, `usb-storage` | Nothing Podman needs |
+| CIS, audit | full rule set in `/etc/audit/rules.d/50-*.rules` and `privileged.rules`, `99-finalize.rules` = `-e 2` (immutable). **All rule files are owned `devops:devops`** (644, `audit.rules` 600) | Immutable: new rules load only at reboot, so the gateway rules go in before the SELinux reboot (docs/02 §2.1). Ownership is a finding: `devops` can rewrite the audit policy without `sudo`; fixed to `root:root 640` in the same step |
+| SELinux | `devops` edited `/etc/selinux/config` with vim (viminfo, bash history: `sestatus`, `vim /etc/selinux/config`) | Disabled by hand by the infrastructure team on 2026-01-07; they are informed before phase 2 re-enables it |
+| Journal | `/var/log/journal` absent: volatile journal, 8 MB, only since the 10:22 boot | The `sudo` evidence of §1.9 covers today only. Made persistent in docs/02 §2.5, container logs depend on it |
+| Cortex XDR | established connection from `pmd` to 10.100.1.100:8888 (a Cortex XDR Broker VM); `cytool status`, `last_checkin`, `runtime query`, `websocket query` exist | Outbound only, to an internal broker; no inbound rule on 33221 expected. `cytool status` is the post-change health check |
+| `devops` history | `yum install openssl*`, `sestatus`, `vim /etc/selinux/config`, `lsblk`, `vgs`, `sudo -i` | Consistent with the January work (XDR, CIS kit, SELinux off); nothing automated |
+| CIS-CAT report | copied to `/tmp/cis-report.html` on the server | To be fetched and read (§1.12) |
+
+## 1.12 Remaining reads
+
+```bash
+sudo ls -la /etc/ssh/sshd_config.d/ && sudo cat /etc/ssh/sshd_config.d/*.conf
+sudo grep -E '^Defaults' /etc/sudoers
+cat /etc/security/limits.d/60-security_limits.conf
+sudo auditctl -s | grep -E '^(enabled|backlog_limit|lost)'
+stat -c '%U:%G %a %n' /etc/audit /etc/audit/rules.d /etc/audit/auditd.conf 2>&1
+```
+
+And on the workstation: `scp infosec@10.50.4.68:/tmp/cis-report.html .`, open it, paste
+the summary (pass/fail counts per section); then `rm /tmp/cis-report.html` on the server.

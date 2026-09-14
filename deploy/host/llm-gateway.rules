@@ -1,15 +1,17 @@
-# /etc/audit/rules.d/llm-gateway.rules  (apply: augenrules --load)
-# Watch the files whose change would alter who can log in, who is root, or what the
-# gateway runs.
+# /etc/audit/rules.d/llm-gateway.rules
+# Adds to the CIS rule set already in /etc/audit/rules.d/50-*.rules (docs/01 §1.11), which
+# covers identity, sudoers, modules, mounts, permission changes and MAC policy files.
+# The CIS 99-finalize.rules ends with "-e 2" (immutable configuration): new rules load
+# only at the next boot, so this file is installed before the SELinux reboot of docs/02
+# §2.1 and verified with "auditctl -l" after it. Watches for what decides who can log in
+# and what the gateway runs:
 -w /etc/ssh/sshd_config -p wa -k sshd
 -w /etc/ssh/sshd_config.d/ -p wa -k sshd
--w /etc/sudoers -p wa -k sudo
--w /etc/sudoers.d/ -p wa -k sudo
 -w /etc/subuid -p wa -k subid
 -w /etc/subgid -p wa -k subid
 -w /etc/containers/ -p wa -k containers
 -w /etc/nftables/ -p wa -k firewall
 -w /etc/sysconfig/nftables.conf -p wa -k firewall
+-w /etc/firewalld/ -p wa -k firewall
 -w /opt/llm-gateway/ -p wa -k gateway
 -w /home/llmgw/.config/containers/ -p wa -k gateway
--w /home/llmgw/.local/share/containers/storage/ -p wa -k gateway-storage
