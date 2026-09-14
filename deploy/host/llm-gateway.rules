@@ -1,10 +1,10 @@
 # /etc/audit/rules.d/llm-gateway.rules
 # Adds to the CIS rule set already in /etc/audit/rules.d/50-*.rules (docs/01 §1.11), which
 # covers identity, sudoers, modules, mounts, permission changes and MAC policy files.
-# The CIS 99-finalize.rules ends with "-e 2" (immutable configuration): new rules load
-# only at the next boot, so this file is installed before the SELinux reboot of docs/02
-# §2.1 and verified with "auditctl -l" after it. Watches for what decides who can log in
-# and what the gateway runs:
+# The CIS 99-finalize.rules carries "-e 2"; the runtime was mutable on 2026-09-14, but if
+# a boot makes it immutable, later changes need a reboot. This file is installed and
+# loaded in docs/02 §2.1 before the SELinux reboot and verified with "auditctl -l" after
+# it. Watches for what decides who can log in and what the gateway runs:
 -w /etc/ssh/sshd_config -p wa -k sshd
 -w /etc/ssh/sshd_config.d/ -p wa -k sshd
 -w /etc/subuid -p wa -k subid

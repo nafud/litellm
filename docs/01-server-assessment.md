@@ -356,7 +356,7 @@ administrators' confirmation.
 | CIS Build Kit, sshd | Remediation lines in `/etc/ssh/sshd_config` **above** the `Include sshd_config.d` line: `PermitRootLogin no`, `MaxAuthTries 4`, `LoginGraceTime 60`, `ClientAliveInterval 15` / `CountMax 3`, `LogLevel VERBOSE`, `MaxStartups`, `MaxSessions 10`, `PermitEmptyPasswords no`, `PermitUserEnvironment no`, `HostbasedAuthentication no`, `IgnoreRhosts yes`, `Banner /etc/issue.net`, `AllowUsers`/`AllowGroups devops infosec`, `DenyUsers`/`DenyGroups root` | sshd keeps the first value read, so these cannot be changed by a drop-in; `deploy/host/10-sshd-hardening.conf` was reduced to what CIS did not set (password and keyboard-interactive off, no X11/agent forwarding, local TCP forwarding) |
 | CIS, sysctl | `/etc/sysctl.d/60-{fs,ipv4,ipv6,kernel}_sysctl.conf` (2026-01-07): dumpable, dmesg, ASLR, ptrace, redirects, source routing, forwarding off, martians, rp_filter, syncookies, IPv6 RA | `deploy/host/90-hardening.conf` reduced to the missing keys |
 | CIS, modules | blacklists for `sctp`, `tipc`, `can`, `l2tp*`, `usb-storage` | Nothing Podman needs |
-| CIS, audit | full rule set in `/etc/audit/rules.d/50-*.rules` and `privileged.rules`, `99-finalize.rules` = `-e 2` (immutable). **All rule files are owned `devops:devops`** (644, `audit.rules` 600) | Immutable: new rules load only at reboot, so the gateway rules go in before the SELinux reboot (docs/02 §2.1). Ownership is a finding: `devops` can rewrite the audit policy without `sudo`; fixed to `root:root 640` in the same step |
+| CIS, audit | full rule set in `/etc/audit/rules.d/50-*.rules` and `privileged.rules`, `99-finalize.rules` = `-e 2`. **All rule files are owned `devops:devops`** (644, `audit.rules` 600) | Runtime turned out mutable (§1.13), so rules can be loaded at any time; the gateway rules still go in before the SELinux reboot (docs/02 §2.1) to be verified once. Ownership is fixed to `root:root 640` in the same step (CIS conformance; `/etc/audit` itself is root 750) |
 | SELinux | `devops` edited `/etc/selinux/config` with vim (viminfo, bash history: `sestatus`, `vim /etc/selinux/config`) | Disabled by hand by the infrastructure team on 2026-01-07; they are informed before phase 2 re-enables it |
 | Journal | `/var/log/journal` absent: volatile journal, 8 MB, only since the 10:22 boot | The `sudo` evidence of §1.9 covers today only. Made persistent in docs/02 §2.5, container logs depend on it |
 | Cortex XDR | established connection from `pmd` to 10.100.1.100:8888 (a Cortex XDR Broker VM); `cytool status`, `last_checkin`, `runtime query`, `websocket query` exist | Outbound only, to an internal broker; no inbound rule on 33221 expected. `cytool status` is the post-change health check |
@@ -375,3 +375,16 @@ stat -c '%U:%G %a %n' /etc/audit /etc/audit/rules.d /etc/audit/auditd.conf 2>&1
 
 And on the workstation: `scp infosec@10.50.4.68:/tmp/cis-report.html .`, open it, paste
 the summary (pass/fail counts per section); then `rm /tmp/cis-report.html` on the server.
+
+## 1.13 Results of the remaining reads (2026-09-14)
+
+| Item | Result | Consequence |
+|------|--------|-------------|
+| sshd drop-ins | only RHEL's `40-redhat-crypto-policies.conf` and `50-redhat.conf` (root, 600) | `10-sshd-hardening.conf` sorts before both and wins inside the include for the keys it sets (`X11Forwarding` is the one RHEL's file also sets) |
+| sudoers | stock RHEL `Defaults` (`env_reset`, `secure_path`, no `logfile`, no `use_pty`) | sudo events reach the SIEM through authpriv already; the CIS `-w /var/log/sudo.log` watch points at a file that does not exist. Optional CIS items for §2.2, not required by the deployment |
+| limits | `* hard core 0` | Fine; containers inherit it, nothing needs core dumps |
+| audit runtime | `enabled 1`, `backlog_limit 8192`, `lost 0` | The configuration is **not** immutable at runtime although `99-finalize.rules` contains `-e 2`; `augenrules --load` will apply new rules immediately. Whether the next boot ends immutable depends on where `augenrules` places the `-e` line; §2.1 installs the rules before the reboot and verifies after it either way |
+| `/etc/audit` | `root:root 750` | `devops` cannot reach its own rule files without `sudo` (which it has without a password); the ownership fix stays as a CIS conformance item, severity lower than first assessed |
+| CIS-CAT report | fetched by the owner, `/tmp` copy removed | Summary to be pasted when convenient; not blocking |
+
+Phase 1 is complete with this round. Everything else is a decision (§1.3).

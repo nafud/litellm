@@ -39,13 +39,15 @@ the XDR agent or the CIS kit, neither needs it off).
 
 The Red Hat procedure for a system that has been running without SELinux: go to
 **permissive** first, force a full relabel at the next boot, reboot, look for denials,
-then switch to enforcing. Because the CIS audit configuration is immutable (`-e 2`),
-the audit rules of §2.5 are installed before this same reboot so both take effect
-together:
+then switch to enforcing. The audit rules of §2.5 are installed before this same reboot
+(the CIS `99-finalize.rules` carries `-e 2`; the runtime was mutable on 2026-09-14, but
+loading them here means one verification after the reboot covers both):
 
 ```bash
 sudo install -m 640 -o root -g root /tmp/host/llm-gateway.rules /etc/audit/rules.d/llm-gateway.rules
 sudo chown root:root /etc/audit/rules.d/*.rules && sudo chmod 640 /etc/audit/rules.d/*.rules   # CIS files are owned by devops (docs/01 §1.11)
+sudo augenrules --check                                                   # "Rules have changed and should be updated"
+sudo augenrules --load && sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'   # 10 (runtime is mutable, docs/01 §1.13)
 sudo sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
 grep -E '^SELINUX=' /etc/selinux/config                                  # SELINUX=permissive
 sudo fixfiles -F onboot            # creates /.autorelabel; the relabel runs during the next boot
@@ -104,7 +106,7 @@ Then, on the server. The CIS Build Kit already wrote most of the hardening into
 authentication off, no X11 or agent forwarding, local TCP forwarding only):
 
 ```bash
-sudo ls -la /etc/ssh/sshd_config.d/                 # existing drop-ins (50-redhat.conf is RHEL's)
+sudo sh -c 'cat /etc/ssh/sshd_config.d/*.conf'    # RHEL's two drop-ins (crypto policy include, 50-redhat.conf)
 sudo install -m 600 -o root -g root /tmp/host/10-sshd-hardening.conf /etc/ssh/sshd_config.d/10-sshd-hardening.conf
 sudo sshd -t && sudo systemctl reload sshd
 sudo sshd -T | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|x11forwarding|allowagentforwarding|allowtcpforwarding|maxauthtries|allowusers) '
@@ -162,16 +164,22 @@ sudo systemctl restart systemd-journald && journalctl --disk-usage && ls -ld /va
   `sudo rsyslogd -N1 && sudo systemctl restart rsyslog` and confirm `ss -tlnp` no longer
   shows 514. If it stays, restrict the source in firewalld (§2.7).
 - Audit: the CIS rule set is in place (`50-*.rules`, `privileged.rules`, docs/01
-  §1.11) and ends with `-e 2`, so the configuration is immutable until reboot;
-  `augenrules --load` cannot add rules at runtime. The gateway rules and the ownership
-  fix (the CIS files are owned by `devops`, which lets that account change audit rules
-  without `sudo`) are therefore part of the §2.1 reboot. Verify afterwards:
+  §1.11) with `-e 2` in `99-finalize.rules`. The gateway rules and the ownership fix
+  (CIS files owned by `devops`) were loaded in §2.1. Verify after the reboot, and note
+  the `enabled` value: `2` means the boot made the configuration immutable and any
+  later audit change needs another reboot:
 
 ```bash
-sudo auditctl -s | grep -E '^(enabled|pid|lost)'     # enabled 2
+sudo auditctl -s | grep -E '^(enabled|pid|lost)'
 sudo auditctl -l | grep -E 'gateway|firewall|subid'
-stat -c '%U:%G %a %n' /etc/audit/rules.d/*.rules      # root:root 640
+sudo stat -c '%U:%G %a %n' /etc/audit/rules.d/*.rules      # root:root 640
 ```
+
+- sudo: stock `Defaults`; sudo events already reach the SIEM via authpriv. Optional CIS
+  items, not needed by the deployment: `Defaults use_pty` and
+  `Defaults logfile="/var/log/sudo.log"` in `/etc/sudoers.d/10-logging` (`visudo -cf`
+  before installing); the CIS audit watch on `/var/log/sudo.log` only makes sense with
+  the second one.
 
 ## 2.6 Kernel parameters
 
