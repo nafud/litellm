@@ -13,7 +13,10 @@ With internet access the normal path is registration with Red Hat; the ISO remai
 fallback if no subscription is available (phase 1 open question 1 decides).
 
 **Option A: register with Red Hat** (needs a Red Hat account or an activation key from
-the customer portal; RHEL 10 uses Simple Content Access, so no `attach` step):
+the customer portal; RHEL 10 uses Simple Content Access, so no `attach` step). On
+2026-09-14 the network firewall blocked `subscription.rhsm.redhat.com` and
+`cdn.redhat.com` (docs/01 §1.4); both must be allowed for this host on TCP 443 first,
+and the §1.4 loop must show an HTTP code for both before running this:
 
 ```bash
 sudo subscription-manager register --username <portal-user>            # prompts for the password
@@ -157,9 +160,9 @@ was taken from. The LiteLLM index was cosign-verified with the vendored key when
 pins were chosen (`scripts/verify-pins.sh` on the workstation, D-18); on the server the
 pull is by digest, so Podman itself rejects any manifest that does not hash to the pin.
 
-If the host uses an HTTP proxy, Podman needs it in the service account's environment
-(`https_proxy` in `~llmgw/.config/environment.d/proxy.conf`, written as `llmgw`; this
-also reaches the Quadlet services). Without a proxy, nothing to do.
+No proxy is in the path on this host (docs/01 §1.4), and `ghcr.io` and Docker Hub
+answered, so nothing to configure for Podman. (With a proxy it would go into
+`~llmgw/.config/environment.d/proxy.conf` as `https_proxy=`.)
 
 **Server**, as `llmgw`:
 
