@@ -1,6 +1,4 @@
-# Secrets and per-server state: never commit these
-deploy/.env
-deploy/litellm.env
+# Secrets and per-server state: never commit these (they live in /opt/llm-gateway/env)
 *.env
 !*.env.example
 

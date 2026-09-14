@@ -1,0 +1,62 @@
+# LiteLLM proxy: the only service with a published port and the only one with egress.
+[Unit]
+Description=LLM gateway: LiteLLM proxy
+# PostgreSQL is mandatory (allow_requests_on_db_unavailable: false): start after it is
+# healthy, and stop/restart together with it.
+Requires=llmgw-postgres.service
+After=llmgw-postgres.service
+# Presidio is wanted, not required: the guardrail fails closed per request if it is down
+# (docs/05 §5.5 tests exactly that), so LiteLLM may keep running while Presidio restarts.
+Wants=llmgw-presidio-analyzer.service llmgw-presidio-anonymizer.service
+After=llmgw-presidio-analyzer.service llmgw-presidio-anonymizer.service
+
+[Container]
+ContainerName=litellm
+# Non-root variant (uid 65534), signed with the key vendored in deploy/cosign/.
+Image=ghcr.io/berriai/litellm-non_root:v1.100.1@sha256:c36f3b27a5a817329e0fcf9c4e3a7bf58b62a5a736ad5352f0a5771c1be58404
+Pull=never
+# Secrets only LiteLLM may see: master key, salt key, DATABASE_URL, UI login, provider keys.
+EnvironmentFile=/opt/llm-gateway/env/litellm.env
+# Presidio endpoints on the internal network; read by the guardrail at startup.
+Environment=PRESIDIO_ANALYZER_API_BASE=http://presidio-analyzer:3000
+Environment=PRESIDIO_ANONYMIZER_API_BASE=http://presidio-anonymizer:3000
+# Models and provider keys come from config.yaml + environment only, never from the DB/UI.
+Environment=STORE_MODEL_IN_DB=False
+# Use the writable runtime UI directory of the non-root image.
+Environment=LITELLM_NON_ROOT=true
+# Refuse to start if the schema migration fails (default would log and continue).
+Environment=ENFORCE_PRISMA_MIGRATION_CHECK=true
+Environment=LITELLM_LOG=INFO
+# Remove the interactive API docs from the attack surface.
+Environment=NO_DOCS=True
+Environment=NO_REDOC=True
+Environment=LITELLM_DONT_SHOW_FEEDBACK_BOX=True
+# Configuration from the repository checkout, read-only, private SELinux label.
+Volume=/opt/llm-gateway/repo/deploy/litellm/config.yaml:/app/config.yaml:ro,Z
+Tmpfs=/tmp
+# Loopback only until TLS termination is in place (DECISIONS.md D-10); the address is
+# deployment configuration and is changed here, committed, then the unit reloaded.
+PublishPort=127.0.0.1:4000:4000
+# Arguments to the image entrypoint (prod_entrypoint.sh -> litellm "$@").
+Exec=--config /app/config.yaml --port 4000
+Network=llmgw-backend.network
+Network=llmgw-egress.network
+DropCapability=all
+NoNewPrivileges=true
+LogDriver=journald
+HealthCmd=python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=120s
+HealthOnFailure=kill
+Notify=healthy
+
+[Service]
+Restart=always
+RestartSec=5
+# Prisma migration + spaCy-independent startup can exceed the 90 s systemd default.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

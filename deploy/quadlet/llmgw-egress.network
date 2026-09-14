@@ -1,0 +1,4 @@
+# Egress network: only LiteLLM is attached. Outbound traffic leaves through the rootless
+# user's network namespace (pasta) as the llmgw user, which the host firewall can match.
+[Network]
+NetworkName=llmgw-egress

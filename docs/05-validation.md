@@ -1,10 +1,11 @@
 # Phase 5: Validation
 
-Run from the server itself while `LITELLM_BIND_ADDR=127.0.0.1`. Export the master key
-for the session only:
+Run on the server while LiteLLM listens on `127.0.0.1`. `curl` commands work from the
+admin account or the `llmgw` session; `podman` commands need the `llmgw` session
+(`sudo machinectl shell llmgw@`). Export the master key for the session only:
 
 ```bash
-export MASTER_KEY="$(sudo grep '^LITELLM_MASTER_KEY=' /opt/llm-gateway/deploy/litellm.env | cut -d= -f2-)"
+export MASTER_KEY="$(sudo grep '^LITELLM_MASTER_KEY=' /opt/llm-gateway/env/litellm.env | cut -d= -f2-)"   # as llmgw: without sudo
 export BASE=http://127.0.0.1:4000
 ```
 
@@ -21,8 +22,7 @@ under the guardrails/callbacks it shows.
 ## 5.2 Presidio services directly (from the LiteLLM container, they are not published)
 
 ```bash
-sudo docker compose -f /opt/llm-gateway/deploy/docker-compose.yml exec litellm \
-  python3 - <<'PY'
+llmgw$ podman exec -i litellm python3 - <<'PY'
 import json, urllib.request
 req = urllib.request.Request("http://presidio-analyzer:3000/analyze",
     data=json.dumps({"text": "My name is Dennis Yurichev, mail dennis@example.com", "language": "en"}).encode(),
@@ -74,14 +74,16 @@ The concatenated content must again read `... Dennis Yurichev dennis@example.com
 ## 5.5 Fail-closed check
 
 Stop the analyzer and repeat 5.4: the request must be rejected (HTTP 4xx/5xx with a
-guardrail error), never forwarded unmasked.
+guardrail error), never forwarded unmasked. LiteLLM keeps running because its unit only
+*wants* the Presidio units (`Wants=`), it does not *require* them.
 
 ```bash
-sudo docker compose -f /opt/llm-gateway/deploy/docker-compose.yml stop presidio-analyzer
+llmgw$ systemctl --user stop llmgw-presidio-analyzer.service
+llmgw$ systemctl --user is-active llmgw-litellm.service        # active
 curl -sS -o /dev/null -w 'HTTP %{http_code}\n' $BASE/v1/chat/completions \
   -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" \
   -d '{"model":"mock-echo","messages":[{"role":"user","content":"I am Dennis Yurichev"}]}'
-sudo docker compose -f /opt/llm-gateway/deploy/docker-compose.yml start presidio-analyzer
+llmgw$ systemctl --user start llmgw-presidio-analyzer.service
 ```
 
 ## 5.6 Virtual keys and budgets
@@ -114,8 +116,7 @@ request records which guardrail ran and how many entities were masked, without t
 prompt body:
 
 ```bash
-sudo docker compose -f /opt/llm-gateway/deploy/docker-compose.yml exec postgres \
-  psql -U litellm -d litellm -c \
+llmgw$ podman exec postgres psql -U litellm -d litellm -c \
   "select request_id, model, spend, metadata->'applied_guardrails' as guardrails, metadata->'guardrail_information' as info from \"LiteLLM_SpendLogs\" order by \"startTime\" desc limit 3;"
 ```
 
@@ -131,14 +132,25 @@ provider credentials.
 
 ## 5.9 Clean up and record
 
-- Remove the `mock-echo` entry from `deploy/litellm/config.yaml`, commit, and
-  `sudo docker compose up -d litellm` (config is mounted, so a restart applies it).
+- Remove the `mock-echo` entry from `deploy/litellm/config.yaml`, commit, `git pull` in
+  `/opt/llm-gateway/repo` as `llmgw`, then `systemctl --user restart llmgw-litellm.service`
+  (the file is bind-mounted, so a restart applies it).
 - Delete the validation key: `POST /key/delete` with `{"keys":["<key>"]}`.
 - Record the results (pass/fail per section, versions, date) in the phase 5 entry of
   `README.md` and any deviations in `DECISIONS.md`.
 
-## 5.10 Exit criteria
+## 5.10 Exit criteria and opening the port
 
-All of 5.1 to 5.7 pass as described; 5.5 proves fail-closed. Then switch
-`LITELLM_BIND_ADDR` to the LAN IP (`docker compose up -d litellm`), re-check `ss -tlnp`,
-and confirm the `DOCKER-USER` rules limit access to the client subnet.
+All of 5.1 to 5.7 pass as described; 5.5 proves fail-closed. Then serve the client
+network: change `PublishPort=127.0.0.1:4000:4000` in
+`deploy/quadlet/llmgw-litellm.container` to the LAN address (`<lan-ip>:4000:4000`),
+commit, pull on the server, and
+
+```bash
+llmgw$ systemctl --user daemon-reload && systemctl --user restart llmgw-litellm.service
+sudo ss -tlnp | grep ':4000 '
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="<client-cidr>" port port="4000" protocol="tcp" accept'
+sudo firewall-cmd --reload && sudo firewall-cmd --list-rich-rules
+```
+
+Plain HTTP on the LAN is acceptable only until TLS termination is in place (D-10).

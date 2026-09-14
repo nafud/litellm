@@ -68,7 +68,7 @@ guardrails:
         MEDICAL_LICENSE: MASK
         CRYPTO: MASK
       # Analyzer endpoints are taken from PRESIDIO_ANALYZER_API_BASE /
-      # PRESIDIO_ANONYMIZER_API_BASE in the environment (set in docker-compose.yml).
+      # PRESIDIO_ANONYMIZER_API_BASE in the environment (set in deploy/quadlet/llmgw-litellm.container).
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

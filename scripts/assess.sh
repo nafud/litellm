@@ -156,27 +156,36 @@ runsh "world-writable dirs without sticky bit (should be none)" "find / -xdev -t
 runsh "SUID/SGID binaries" "find / -xdev \( -perm -4000 -o -perm -2000 \) -type f 2>/dev/null"
 
 section "10. Container runtime (existing)"
+if have podman; then
+  run "podman version" podman version
+  run "podman info" podman info
+  run "containers (all, root)" podman ps -a
+  run "images (root)" podman images
+  run "networks (root)" podman network ls
+  runsh "subordinate id ranges" "cat /etc/subuid /etc/subgid"
+  runsh "lingering users" "ls -1 /var/lib/systemd/linger 2>/dev/null"
+  runsh "rootful quadlets" "ls -lR /etc/containers/systemd 2>/dev/null"
+  runsh "registries.conf" "grep -v '^\s*#' /etc/containers/registries.conf | grep -v '^\s*$'"
+  runsh "policy.json" "cat /etc/containers/policy.json"
+else
+  echo "podman: not installed"
+fi
 if have docker; then
   run "docker version" docker version
-  run "docker info" docker info
-  run "daemon.json" cat /etc/docker/daemon.json
   run "containers (all)" docker ps -a
-  run "images" docker images
-  run "volumes" docker volume ls
-  run "networks" docker network ls
   runsh "docker socket perms" "ls -l /var/run/docker.sock"
 else
   echo "docker: not installed"
 fi
-have podman && run "podman version" podman version
 have cosign && run "cosign version" cosign version
+runsh "container packages" "rpm -q podman netavark aardvark-dns container-selinux passt crun conmon skopeo shadow-utils-subid 2>&1"
 
 section "11. Egress reachability (read-only GET/HEAD, 8s timeout)"
 # 000 = no connection (blocked or DNS failure). Any HTTP code means the path is open.
 for u in \
   https://ghcr.io/v2/ \
   https://registry-1.docker.io/v2/ \
-  https://download.docker.com/linux/ \
+  https://cdn.redhat.com/ \
   https://github.com/ \
   https://api.anthropic.com/ \
   https://api.openai.com/ \

@@ -1,0 +1,7 @@
+# Internal network shared by PostgreSQL, Presidio and LiteLLM.
+# Internal=true: no default route and no masquerading, so PostgreSQL and Presidio can
+# never reach anything outside the host. Container names (postgres, presidio-analyzer,
+# presidio-anonymizer) resolve through aardvark-dns; nothing else is resolvable here.
+[Network]
+NetworkName=llmgw-backend
+Internal=true

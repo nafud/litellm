@@ -1,0 +1,37 @@
+#!/usr/sbin/nft -f
+# /etc/nftables/llmgw-egress.nft
+#
+# Host-level egress policy for the gateway's service account. Rootless Podman sends all
+# container traffic through pasta, a process owned by the llmgw user, so "meta skuid llmgw"
+# matches exactly the containers' outbound packets and nothing else on the host.
+# The table is separate from firewalld's own table; firewalld only manages "table inet
+# firewalld" and leaves this one alone. Load: nft -c -f <file> (check), then via
+# /etc/sysconfig/nftables.conf 'include' and systemctl enable --now nftables.
+#
+# Policy for llmgw: established/related, loopback, DNS to the host resolvers, HTTPS (443)
+# anywhere. Everything else from llmgw is logged and dropped. FQDN-level allow-listing of
+# provider APIs is done on the network firewall (architecture), not here.
+
+table inet llmgw_egress {
+    set resolvers4 {
+        type ipv4_addr
+        # Fill in from /etc/resolv.conf (ip route / nmcli). Example: elements = { 10.0.0.53 }
+    }
+
+    chain output {
+        type filter hook output priority filter + 10; policy accept;
+        # Only packets owned by an llmgw socket are inspected. Kernel-generated packets
+        # (ICMP errors, RSTs) and every other user's traffic never enter the llmgw chain.
+        meta skuid "llmgw" jump llmgw
+    }
+
+    chain llmgw {
+        ct state established,related accept
+        oif "lo" accept
+        ip daddr @resolvers4 udp dport 53 accept
+        ip daddr @resolvers4 tcp dport 53 accept
+        tcp dport 443 accept
+        log prefix "llmgw-egress-drop " level info
+        drop
+    }
+}

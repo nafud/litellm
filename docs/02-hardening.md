@@ -1,195 +1,145 @@
-# Phase 2: Host hardening
+# Phase 2: Host hardening (RHEL 10)
 
-Applied only after the phase 1 report is reviewed. Each item is marked in the review
-as **required**, **already in place**, or **not applicable**. Apply items one at a time
-and verify each before the next; keep a second SSH session open while changing SSH or
-firewall rules.
+Applied only after the phase 1 report is reviewed. Each item is marked in the review as
+**required**, **already in place**, or **not applicable**. Apply items one at a time and
+verify each before the next; keep a second SSH session open while changing SSH or
+firewall rules. The files referenced below live in `deploy/host/` so that what runs on
+the server is what is reviewed in the repository.
 
-Commands are given for Debian/Ubuntu (apt) with RHEL-family (dnf) notes where they differ.
+The host is RHEL 10.1 with SELinux, firewalld and chrony as shipped. Hardening keeps all
+three and adds to them; nothing here disables a Red Hat default.
 
 ## 2.1 Accounts
 
-- One named admin account with `sudo`; work from it, never from `root` directly.
-- `sudo` entries limited to that account/group; no `NOPASSWD` unless required for
-  automation and then scoped to specific commands.
-- Remove or lock accounts the report shows as unused: `sudo usermod -L -e 1 <user>`.
+- Work from the named admin account (`infosec`, member of `wheel`), never from `root`.
+  RHEL's default `%wheel ALL=(ALL) ALL` sudo rule is enough; no `NOPASSWD`.
+- Lock accounts the report shows as unused: `sudo usermod -L -e 1 <user>`.
 - No account with an empty password (report section 3).
-- Do **not** add users to the `docker` group: membership is root-equivalent. Operate the
-  stack with `sudo docker compose ...` from the admin account.
+- The stack runs under a dedicated, unprivileged service account `llmgw` created in
+  phase 3: no password, no `sudo`, no SSH login, no membership in `wheel`. There is no
+  root-equivalent group to avoid (Podman has no daemon and no socket).
 
 ## 2.2 SSH
 
-Write a drop-in rather than editing the main file, then test before reloading:
-
 ```bash
-sudo tee /etc/ssh/sshd_config.d/10-hardening.conf >/dev/null <<'CONF'
-PermitRootLogin no
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PubkeyAuthentication yes
-PermitEmptyPasswords no
-AllowUsers <admin>
-MaxAuthTries 3
-LoginGraceTime 30
-X11Forwarding no
-AllowAgentForwarding no
-AllowTcpForwarding no
-ClientAliveInterval 300
-ClientAliveCountMax 2
-CONF
-sudo sshd -t && sudo systemctl reload ssh   # 'sshd' on RHEL-family
+sudo install -m 644 -o root -g root /opt/llm-gateway/repo/deploy/host/10-sshd-hardening.conf /etc/ssh/sshd_config.d/10-sshd-hardening.conf
+sudo sshd -t && sudo systemctl reload sshd
+sudo sshd -T | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|allowusers|allowtcpforwarding) '
 ```
 
 Confirm from a **new** session that key login still works before closing the old one.
-Confirm the effective values: `sudo sshd -T | grep -Ei '^(permitrootlogin|passwordauthentication|allowusers)'`.
+`AllowTcpForwarding local` stays on because the admin UI is only reachable through
+`ssh -L 4000:127.0.0.1:4000` until TLS is in place (DECISIONS.md D-10).
+Cipher, MAC and key-exchange lists are governed by the system crypto policy
+(`update-crypto-policies --show` should print `DEFAULT` or `FUTURE`); do not hand-edit them.
 
 ## 2.3 Updates
 
 ```bash
-sudo apt-get update && sudo apt-get -y full-upgrade && sudo reboot   # if kernel updated
-sudo apt-get install -y unattended-upgrades
-sudo dpkg-reconfigure -plow unattended-upgrades       # security origin only is the default
+sudo dnf -y upgrade && sudo reboot            # if a kernel or glibc update was applied
+sudo dnf -y install dnf-automatic
+sudo sed -i -e 's/^upgrade_type = .*/upgrade_type = security/' -e 's/^apply_updates = .*/apply_updates = yes/' /etc/dnf/automatic.conf
+sudo systemctl enable --now dnf-automatic.timer
+grep -E '^(upgrade_type|apply_updates)' /etc/dnf/automatic.conf
 ```
 
-RHEL-family: `sudo dnf -y upgrade`, then `dnf-automatic` with `upgrade_type = security`
-and `apply_updates = yes`, `systemctl enable --now dnf-automatic.timer`.
-
-Container images are updated separately (docs/06-operations.md); host auto-updates must
-not touch Docker packages unexpectedly: pin them with `apt-mark hold docker-ce docker-ce-cli containerd.io docker-compose-plugin`
-after phase 3 and update them deliberately.
+Podman is delivered through the same channel (the rolling `container-tools` stream) and
+receives security fixes there; because Podman has no daemon, a package update never
+restarts the running containers. Container **images** are updated only deliberately
+(docs/06-operations.md §6.3).
 
 ## 2.4 Time, logging, audit
 
-- Time sync active (`timedatectl` shows `System clock synchronized: yes`); install
-  `chrony` if not.
-- Persistent journal: `sudo mkdir -p /var/log/journal && sudo systemctl restart systemd-journald`
-  (or `Storage=persistent` in `/etc/systemd/journald.conf`).
-- `auditd` installed and running. Minimum rules worth having for this host, in
-  `/etc/audit/rules.d/gateway.rules`:
-
-```
--w /etc/ssh/sshd_config -p wa -k sshd
--w /etc/ssh/sshd_config.d/ -p wa -k sshd
--w /etc/sudoers -p wa -k sudo
--w /etc/sudoers.d/ -p wa -k sudo
--w /etc/docker/ -p wa -k docker
--w /opt/llm-gateway/ -p wa -k gateway
--w /var/run/docker.sock -p rwxa -k docker-sock
-```
-
-`sudo augenrules --load && sudo auditctl -l`.
-
-## 2.5 Kernel / sysctl baseline
-
-`/etc/sysctl.d/90-hardening.conf`:
-
-```
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
-net.ipv4.conf.all.accept_redirects = 0
-net.ipv4.conf.default.accept_redirects = 0
-net.ipv4.conf.all.send_redirects = 0
-net.ipv4.conf.all.accept_source_route = 0
-net.ipv4.conf.all.log_martians = 1
-net.ipv6.conf.all.accept_redirects = 0
-net.ipv6.conf.all.accept_ra = 0
-kernel.kptr_restrict = 2
-kernel.dmesg_restrict = 1
-kernel.yama.ptrace_scope = 1
-kernel.randomize_va_space = 2
-fs.protected_hardlinks = 1
-fs.protected_symlinks = 1
-fs.protected_fifos = 2
-fs.protected_regular = 2
-fs.suid_dumpable = 0
-```
-
-`sudo sysctl --system`. Do **not** set `net.ipv4.ip_forward = 0`: Docker needs
-forwarding for published ports and container networking (it enables it itself).
-
-## 2.6 Host firewall and Docker
-
-Docker inserts its own rules ahead of the host's `INPUT` chain: a published container
-port is reachable regardless of `ufw`/`firewalld` `INPUT` rules. Two controls make this
-safe here:
-
-1. **Bind narrowly.** The stack publishes LiteLLM only on `LITELLM_BIND_ADDR`
-   (`127.0.0.1` for validation, then the internal LAN IP). PostgreSQL and Presidio are
-   never published.
-2. **Filter in `DOCKER-USER`.** Docker guarantees this chain is evaluated first for
-   traffic to containers and never overwrites it. Restrict who may reach port 4000:
+- Time: `timedatectl` shows `System clock synchronized: yes` and `chronyd` is active.
+- Journal: RHEL keeps a persistent journal in `/var/log/journal`; confirm with
+  `journalctl --disk-usage`. Container logs go there too (`LogDriver=journald`), so set a
+  cap if the disk is shared: `SystemMaxUse=2G` in `/etc/systemd/journald.conf.d/size.conf`.
+- Audit rules for the files that decide who can log in, who is root and what the gateway runs:
 
 ```bash
-# Allow the client subnet(s) to reach LiteLLM, drop everything else destined to containers
-# that arrives from outside the host. Adjust interface name and CIDRs from the report.
-sudo iptables -I DOCKER-USER -i <ext-iface> -p tcp --dport 4000 -s <client-cidr> -j RETURN
-sudo iptables -I DOCKER-USER -i <ext-iface> -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
-sudo iptables -A DOCKER-USER -i <ext-iface> -j DROP
+sudo install -m 640 -o root -g root /opt/llm-gateway/repo/deploy/host/llm-gateway.rules /etc/audit/rules.d/llm-gateway.rules
+sudo augenrules --load && sudo auditctl -l | grep -c -E 'sshd|sudo|subid|containers|firewall|gateway'
 ```
 
-Persist with `iptables-persistent` (Debian/Ubuntu) or in firewalld's direct rules.
-These rules can only be written **after** Docker is installed (phase 3) because Docker
-creates the chain; until then a host firewall with default-deny inbound and an allow for
-SSH from the admin network is the baseline:
+## 2.5 SELinux
+
+Stays **enforcing** (`getenforce`). container-selinux confines every container to
+`container_t`; the units label their bind mounts with `:Z` so nothing needs a boolean or
+a custom module. If something is denied, read the denial rather than lowering the mode:
 
 ```bash
-sudo apt-get install -y nftables
-sudo tee /etc/nftables.conf >/dev/null <<'NFT'
-#!/usr/sbin/nft -f
-flush ruleset
-table inet filter {
-  chain input {
-    type filter hook input priority 0; policy drop;
-    iif lo accept
-    ct state established,related accept
-    ip protocol icmp accept
-    ip6 nexthdr icmpv6 accept
-    tcp dport 22 ip saddr <admin-cidr> accept
-  }
-  chain forward { type filter hook forward priority 0; policy accept; }
-  chain output  { type filter hook output  priority 0; policy accept; }
-}
-NFT
-sudo nft -c -f /etc/nftables.conf && sudo systemctl enable --now nftables
+sudo ausearch -m AVC -ts recent
 ```
 
-Egress restriction to provider APIs only belongs on the network firewall (as in the
-architecture diagram); host-level egress filtering by FQDN is brittle and is not attempted.
-
-## 2.7 Docker daemon defaults (applied in phase 3, listed here for review)
-
-`/etc/docker/daemon.json`:
-
-```json
-{
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "10m", "max-file": "5" },
-  "live-restore": true,
-  "no-new-privileges": true,
-  "userland-proxy": false
-}
-```
-
-`no-new-privileges` at daemon level backs the per-service setting in the compose file.
-`userland-proxy: false` publishes ports with iptables DNAT only (no `docker-proxy`
-process per port).
-
-## 2.8 Deployment directory
+## 2.6 Kernel parameters
 
 ```bash
-sudo mkdir -p /opt/llm-gateway && sudo chown root:root /opt/llm-gateway && sudo chmod 750 /opt/llm-gateway
+sudo install -m 644 -o root -g root /opt/llm-gateway/repo/deploy/host/90-hardening.conf /etc/sysctl.d/90-hardening.conf
+sudo sysctl --system | grep -E 'rp_filter|accept_redirects|kptr_restrict|ptrace_scope'
+sysctl user.max_user_namespaces net.ipv4.ip_unprivileged_port_start   # must be > 0 and 1024
 ```
 
-Secrets files inside it are `root:root 600`. Only root (via sudo) reads them; the Docker
-daemon (root) passes them to the containers.
+`ip_forward` is left at the RHEL default: rootless Podman networks live in the service
+account's own network namespace and do not route through the host. Port 4000 is above
+the unprivileged-port boundary, so it needs no change either.
 
-## 2.9 Verification
+## 2.7 Inbound: firewalld
+
+firewalld stays enabled. A port published by a rootless container is an ordinary
+listening socket owned by `llmgw`, so firewalld's rules apply to it exactly as to any
+other service (unlike Docker, which inserts its own chains ahead of the host's rules).
+
+```bash
+sudo firewall-cmd --get-default-zone            # public on a stock install
+sudo firewall-cmd --permanent --zone=public --remove-service=cockpit
+sudo firewall-cmd --permanent --zone=public --remove-service=dhcpv6-client
+# SSH only from the admin network; replace the CIDR from the assessment.
+sudo firewall-cmd --permanent --zone=public --remove-service=ssh
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="<admin-cidr>" service name="ssh" accept'
+sudo firewall-cmd --reload && sudo firewall-cmd --list-all
+```
+
+Port 4000 is not opened in this phase: LiteLLM listens on `127.0.0.1` until validation
+is complete (docs/05 §5.10 opens it for the client subnet).
+
+## 2.8 Outbound: egress policy for the service account
+
+Rootless Podman sends all container traffic through `pasta`, a process owned by `llmgw`,
+so the host can attribute every outbound packet of the stack to that uid. The ruleset
+in `deploy/host/llmgw-egress.nft` allows `llmgw` only established traffic, loopback, DNS
+to the host resolvers and TCP 443; everything else from that uid is logged and dropped.
+It is a separate nftables table that coexists with firewalld (which manages only its own
+table). FQDN-level allow-listing of the provider APIs remains the network firewall's
+job, as in the architecture.
+
+```bash
+sudo dnf -y install nftables
+sudo install -m 644 -o root -g root /opt/llm-gateway/repo/deploy/host/llmgw-egress.nft /etc/nftables/llmgw-egress.nft
+sudoedit /etc/nftables/llmgw-egress.nft         # fill the resolvers4 set from /etc/resolv.conf
+sudo nft -c -f /etc/nftables/llmgw-egress.nft   # syntax check, applies nothing
+echo 'include "/etc/nftables/llmgw-egress.nft"' | sudo tee -a /etc/sysconfig/nftables.conf
+sudo systemctl enable --now nftables
+sudo nft list table inet llmgw_egress
+```
+
+Apply this **after** phase 3 has created the `llmgw` user (nft resolves the name at load
+time). Test in docs/04 §4.5: HTTPS from LiteLLM works, anything else from a container
+appears in `journalctl -k | grep llmgw-egress-drop`.
+
+## 2.9 Deployment directory
+
+Created in phase 3 together with the service account (docs/03 §3.5): `/opt/llm-gateway`
+owned `root:llmgw` mode `0750`, with `repo/`, `env/` and `data/` owned by `llmgw`.
+
+## 2.10 Verification
 
 - `sudo sshd -T` shows the intended values; a fresh SSH login works.
-- `sudo nft list ruleset` (or `iptables -S`) shows default-deny inbound with SSH allowed.
-- `sudo sysctl -a 2>/dev/null | grep -E 'rp_filter|accept_redirects|kptr_restrict'` matches.
-- `sudo auditctl -l` lists the rules; `systemctl is-active auditd chrony` both `active`.
+- `sudo firewall-cmd --list-all` shows only the SSH rich rule (no services) on `public`.
+- `sudo nft list table inet llmgw_egress` shows the two chains (after phase 3).
+- `sudo sysctl -a 2>/dev/null | grep -E 'rp_filter|accept_redirects|kptr_restrict'` matches the file.
+- `sudo auditctl -l` lists the rules; `systemctl is-active auditd chronyd` both `active`.
+- `getenforce` prints `Enforcing`.
 - Re-run `scripts/assess.sh` and diff against the phase 1 report.
 
-Optional independent check: `lynis audit system` (package `lynis`) gives a scored
-baseline to compare before/after.
+Optional independent check: `lynis audit system` (EPEL package `lynis`) gives a scored
+baseline to compare before and after.

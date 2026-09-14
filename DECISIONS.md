@@ -16,14 +16,17 @@ Each entry: what was decided, why, and what it depends on. Amend rather than del
   `PGDATA` to `/var/lib/postgresql/18/docker` and the volume mount point to
   `/var/lib/postgresql`; mounting at the pre-18 path `/var/lib/postgresql/data` would
   silently fail to persist data.
-- All four images are pinned `tag@sha256:digest`, and the digests were read from the
-  registries' manifest APIs on 2026-09-14. Updating = change tag + digest together, then
-  `scripts/verify-images.sh`.
+- All four images are pinned `tag@sha256:digest` (fully qualified, including
+  `docker.io/library/` for PostgreSQL, because Podman does not resolve short names in a
+  non-interactive service), and the digests were read from the registries' manifest APIs
+  on 2026-09-14. Updating = change tag + digest together on the unit's `Image=` line,
+  then `scripts/verify-images.sh`.
 
 ## D-02 Signature verification
 LiteLLM signs all `ghcr.io/berriai/*` images with one cosign key. The key is vendored in
 `deploy/cosign/` (provenance in its README). Presidio and PostgreSQL images are not
-verified by signature; integrity relies on the digest pin.
+verified by signature; integrity relies on the digest pin. Verification runs with the
+cosign binary, not Podman's pull-time policy: see D-13 for why.
 
 ## D-03 Provider keys live only in the LiteLLM environment
 `STORE_MODEL_IN_DB=False` and `store_model_in_db: false`: models and provider keys come
@@ -43,23 +46,36 @@ credential-bearing object that does land in the DB; it must never change once da
 - Language is `en`; the stock analyzer image contains only the English spaCy model.
   Multilingual detection requires a custom analyzer configuration (future decision).
 
-## D-05 Network segmentation inside Docker
-- `backend` is an `internal: true` network: PostgreSQL and Presidio have no route to the
-  internet. Only `litellm` is also on `egress`.
-- Nothing but LiteLLM publishes a port, and only on `LITELLM_BIND_ADDR`
-  (default `127.0.0.1`). PostgreSQL is never reachable from the host network.
-- The network-level egress firewall (allow provider API hosts from the gateway host only)
-  is an infrastructure control outside this repo; the assessment records whether it exists.
+## D-05 Network segmentation inside Podman
+- `llmgw-backend` is an `Internal=true` network: no default route, no masquerading, so
+  PostgreSQL and Presidio have no path out of the host. Only `litellm` is also on
+  `llmgw-egress`. Name resolution is aardvark-dns, container names only.
+- Nothing but LiteLLM publishes a port, and only on `127.0.0.1` until validation is done
+  (`PublishPort=` in the unit; changed by commit, docs/05 §5.10). PostgreSQL is never
+  reachable from the host network.
+- Rootless Podman gives one more control for free: all container egress leaves through
+  `pasta`, a process owned by `llmgw`, so a host nftables policy keyed on that uid
+  (`deploy/host/llmgw-egress.nft`) restricts the stack to TCP 443 + DNS. The FQDN-level
+  allow-list of provider APIs remains the network firewall's job, as in the architecture.
 
 ## D-06 Container hardening
-- All services: `no-new-privileges`, `cap_drop: ALL`, log rotation, `restart: unless-stopped`.
+- All services: rootless (no container process is root on the host), `NoNewPrivileges`,
+  `DropCapability=all`, journald logging, `Restart=always`, `Pull=never` (images are
+  pulled and verified deliberately; a service restart never touches the network),
+  digest-pinned images, `Notify=healthy` so dependents start only after health.
 - PostgreSQL runs as uid 999 directly, so the entrypoint's root-only chown/gosu path is
-  skipped and no capability is needed. This depends on the named volume (ownership is
-  inherited from the image); a bind mount would need `chown 999:999`.
-- Presidio containers are `read_only` with a tmpfs `/tmp` (gunicorn heartbeat files).
-  If phase 5 shows either container unhealthy because of a write, the fix is a narrower
-  tmpfs, not dropping `read_only`.
-- LiteLLM is not `read_only`: it writes its runtime UI directory and Prisma client at
+  skipped and no capability is needed. `UserNS=keep-id:uid=999,gid=999` maps the host
+  user `llmgw` to uid 999 inside the container, so the bind-mounted data directory stays
+  owned by `llmgw` on the host: readable for backups and inspection without
+  `podman unshare`, and no recursive chown (`:U`) on every start.
+- Presidio containers are `ReadOnly=true`; Podman's `ReadOnlyTmpfs` default provides
+  the writable `/tmp` gunicorn needs for heartbeat files. If phase 5 shows either
+  container unhealthy because of a write, the fix is a narrower tmpfs, not dropping
+  `ReadOnly`.
+- Presidio and LiteLLM (stateless) set `HealthOnFailure=kill`: an unhealthy container is
+  killed and systemd restarts it. PostgreSQL does not: a spurious health failure must not
+  force crash recovery on the database.
+- LiteLLM is not read-only: it writes its runtime UI directory and Prisma client at
   startup. Revisit once the exact write set is observed in phase 5.
 
 ## D-07 Logging and data retention in PostgreSQL
@@ -84,4 +100,60 @@ without spending tokens or requiring a provider key. It is removed after phase 5
 LiteLLM serves plain HTTP on 4000. Virtual keys travel in the `Authorization` header, so
 on any shared network segment TLS termination in front of LiteLLM (nginx/Caddy with an
 internal CA certificate) is required before serving real users. Deferred until the
-assessment shows whether an internal CA exists. Until then `LITELLM_BIND_ADDR=127.0.0.1`.
+assessment shows whether an internal CA exists. Until then `PublishPort=127.0.0.1:4000:4000`.
+
+## D-11 Runtime: rootless Podman with Quadlet, not Docker (RHEL 10)
+Chosen after the assessment showed RHEL 10.1. Evidence, all from the vendors:
+- Red Hat does not ship or support Docker on RHEL 8/9/10 (KB 3696691); Podman is the
+  supported engine and Red Hat's RHEL 10 container guide recommends Quadlet for new
+  deployments and calls rootless containers "much more secure".
+- Docker's own RHEL install page requires removing `podman` and `runc` first, replacing
+  a supported stack with an unsupported one.
+- Docker's firewall integration on RHEL 10 has only two paths: `iptables-nft`, which Red
+  Hat marks unmaintained with removal planned and a kernel warning when `nft_compat`
+  loads (RHEL 10 has no legacy `ip_tables` module; moby #49020 / #49727), or Docker's
+  nftables backend, documented as experimental and not production-ready (Engine 29).
+- Podman is daemonless: no root daemon, no root-equivalent socket; each container is a
+  child of systemd, confined by SELinux, running under the unprivileged `llmgw` account.
+  Podman package updates never restart running containers.
+Verified for this design from the `podman-systemd.unit(5)` pages of 5.4 and 5.6 (same
+key table): `Internal=`, `Notify=healthy`, `HealthOnFailure=`, `UserNS=keep-id:uid=`,
+`ReadOnly`/`ReadOnlyTmpfs`, `Pull=`, symlinked search paths. The units were generated
+with the Podman 5.6.0 Quadlet generator (`--user --dryrun`) with no errors.
+Rootless costs: a one-time account setup (subordinate ids, linger) and operating the
+stack from a `machinectl shell llmgw@` session. No host IP forwarding, no privileged
+port and no capability is needed, so nothing about the design required rootful.
+
+## D-12 Everything of the deployment lives under /opt/llm-gateway
+Requirement from the environment owner: LiteLLM and Presidio are mounted in `/opt`.
+FHS reserves `/opt/<package>` for add-on application software, so one tree holds the
+repository checkout (`repo/`, the source of truth), the secrets (`env/`) and the
+PostgreSQL data (`data/postgres`, a bind mount instead of a Podman named volume so the
+data is where the owner expects it). The Quadlet search path
+`~llmgw/.config/containers/systemd` is a symlink into the checkout. Two things stay
+outside `/opt` on purpose: the service account's home (a non-standard home directory
+would need SELinux file-context equivalences) and the image store
+(`~/.local/share/containers`, a cache that `verify-images.sh` recreates; relocating it
+would need `graphroot`/`runroot` in a user `storage.conf` plus a `semanage fcontext -e`
+equivalence per `containers-storage.conf(5)`, for no security gain).
+
+## D-13 Podman's pull-time signature policy cannot verify LiteLLM's signatures
+Tested on 2026-09-14 with skopeo against the pinned `litellm-non_root` digest: a
+`sigstoreSigned` policy with the vendored key (and `use-sigstore-attachments: true` in
+`registries.d`) rejects the pull with "A signature was required, but no signature
+exists". Cause: LiteLLM signs the multi-arch image index (tag `sha256-<index>.sig`
+exists), not the `linux/amd64` manifest that a pull selects (no `sha256-<manifest>.sig`),
+and containers/image looks for the signature on the pulled manifest. cosign verifies the
+index digest, which is the digest we pin, so `scripts/verify-images.sh` (pull by digest +
+cosign) stays the enforcement point. Revisit if LiteLLM starts signing per-platform
+manifests (`cosign sign --recursive`).
+
+## D-14 Service dependencies
+`llmgw-litellm` `Requires=`+`After=` PostgreSQL (LiteLLM cannot serve without it,
+`allow_requests_on_db_unavailable: false`), so it starts only after PostgreSQL is
+healthy and is restarted with it. It only `Wants=`+`After=` the two Presidio units: the
+guardrail already fails closed per request, and this lets LiteLLM keep running while
+Presidio restarts (and lets docs/05 §5.5 test fail-closed by stopping the analyzer alone).
+Database and role names are set in the PostgreSQL unit (`Environment=`) and repeated in
+`DATABASE_URL`; only the password is in the env files, because a systemd `ExecStart`
+cannot safely reference environment variables in the health command.

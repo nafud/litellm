@@ -1,0 +1,35 @@
+# Presidio analyzer: PII detection (spaCy en_core_web_lg). Internal network only.
+[Unit]
+Description=LLM gateway: Presidio analyzer
+
+[Container]
+ContainerName=presidio-analyzer
+Image=ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364@sha256:ae8f6f111ac2f04e3fec552f7f80edd0dcbfa2dd69ee1b9e030475be31669885
+Pull=never
+# The image runs as uid 1001 and serves gunicorn on $PORT.
+Environment=PORT=3000
+# gunicorn workers; each loads the spaCy model (~1 GB RAM). Raise only deliberately.
+Environment=WORKERS=1
+# Read-only root filesystem. ReadOnlyTmpfs (default true) still provides a writable tmpfs
+# on /tmp, /run, /var/tmp and /dev/shm, which gunicorn needs for its heartbeat files.
+ReadOnly=true
+Network=llmgw-backend.network
+DropCapability=all
+NoNewPrivileges=true
+LogDriver=journald
+HealthCmd=curl -fsS http://127.0.0.1:3000/health
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=90s
+# Stateless service: if it turns unhealthy, kill it and let systemd restart it.
+HealthOnFailure=kill
+Notify=healthy
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target
