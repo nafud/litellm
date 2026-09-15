@@ -159,8 +159,10 @@ llmgw$ systemctl --user list-units 'llmgw-*' && podman ps --format '{{.Names}}\t
 ```
 
 All four containers must come back healthy without anyone starting them. With no AVC
-denials recorded through §4.3 and §4.4, switch SELinux to enforcing (docs/02 §2.1) and
-repeat `podman ps` and one request from docs/05 §5.1.
+denials recorded through §4.3 and §4.4 other than the known rsyslog one (docs/02 §2.1
+result: `syslogd_t` reading `auditd_log_t`), resolve that one first (auditd `syslog`
+plugin or local policy module, agreed with the SIEM team), then switch SELinux to
+enforcing (docs/02 §2.1) and repeat `podman ps` and one request from docs/05 §5.1.
 
 ## 4.6 Exit criteria
 

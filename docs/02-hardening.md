@@ -131,9 +131,26 @@ After the reboot (the relabel of a 400 GB volume with little data takes a few mi
 getenforce                          # Permissive
 ls -Z /etc/passwd /opt /home/infosec                # labels instead of "?"
 sudo ausearch -m AVC,USER_AVC -ts boot | tail -20   # denials since boot; expect none or only noise
-systemctl is-active audit-rules.service; sudo auditctl -s | grep -E '^enabled'   # active, enabled 2
+systemctl is-failed audit-rules.service; sudo auditctl -s | grep -E '^enabled'   # "inactive" (one-shot, exited cleanly; "failed" is the bad answer), enabled 2
 sudo /opt/traps/bin/cytool status | head -5          # XDR agent still healthy
 ```
+
+**Result (2026-09-15):** relabel and second boot took about four minutes. `Permissive`,
+kernel `6.12.0-211.54.1.el10_2`, labels present (`passwd_file_t`, `user_home_t`, `/opt`
+as `usr_t`), no failed units, `audit-rules.service` exited cleanly with `enabled 2` (all
+64 CIS rules loaded for the first time), XDR agent unchanged. Two findings:
+
+- The only AVC denials are `syslogd_t` on `auditd_log_t` (`getattr`, `open`, `watch`,
+  `ioctl` by `in:imfile`): the rsyslog imfile input of §2.5 works in permissive and
+  would stop in enforcing. Resolved before the switch at docs/04 §4.5, with the SIEM
+  team, by one of: the auditd `syslog` plugin (`/etc/audit/plugins.d/syslog.conf`,
+  `active = yes`, `args = LOG_INFO LOG_LOCAL6`; supported path, no custom policy,
+  messages tagged by the plugin instead of `tag_audit_log`), or a local policy module
+  allowing `syslogd_t` read/watch on `auditd_log_t`. Recommendation: the plugin.
+- rsyslog cannot reach `linux-mon.xalqbank.az:514` (connection timed out, every two
+  minutes since boot; the plain `@@` action drops messages meanwhile). Nothing on the
+  host changed on that path; the SIEM team must allow 10.50.4.68 to the collector.
+  Whether it ever worked is unknown: the journal was volatile until today.
 
 Leave it permissive while phase 3 installs Podman and phase 4 starts the stack, checking
 `ausearch -m AVC -ts recent` after each step. Switch to enforcing once phase 4 §4.4 shows
@@ -315,7 +332,7 @@ sudo systemctl restart systemd-journald && journalctl --disk-usage && ls -ld /va
   needs a reboot:
 
 ```bash
-systemctl is-active audit-rules.service              # active
+systemctl is-failed audit-rules.service              # inactive (one-shot unit; "failed" is the bad answer)
 sudo auditctl -s | grep -E '^(enabled|pid|lost)'     # enabled 2
 ```
 
