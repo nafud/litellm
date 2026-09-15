@@ -256,6 +256,19 @@ address is kept in `/etc/hosts` until DNS carries it. Phase 2 runs in this order
 hostname, Satellite registration (brought forward from phase 3 so the system can be
 updated first), updates, logging and audit rules, then the single reboot that boots the
 updated kernel, relabels and brings SELinux to permissive; SSH, sysctl and firewalls
-after it. Because the workstation is Windows, `.gitattributes` pins LF line endings for
+after it. *Amended 2026-09-15:* two reboots instead of one. The first boots the new
+kernel alone (§2.4.1) so that a regression in the Cortex XDR agent or elsewhere has a
+single candidate cause; the second (§2.1) carries the SELinux relabel. Because the workstation is Windows, `.gitattributes` pins LF line endings for
 every file (CRLF would break the units, scripts and YAML on the server) and the key is
 installed without `ssh-copy-id`.
+
+## D-21 No automatic OS updates
+`dnf-automatic` is not installed. The owner patches manually on a monthly window with a
+VM snapshot first (docs/06 §6.8). Reasoning: the host's exposure is internal and its
+most exposed components are the container images, which dnf never touches; the parts an
+unattended security update could break are exactly the ones nobody would be watching
+(a kernel the Cortex XDR agent does not yet support, a podman/crun change picked up by
+the next container restart). Applicable errata remain visible per host in Satellite, so
+the owner still sees what is due. Depends on the window actually happening; if that
+proves unreliable, the fallback is `dnf-automatic` in notify-only mode
+(`apply_updates = no`, `emit_via = motd`), never auto-apply.

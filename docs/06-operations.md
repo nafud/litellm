@@ -33,7 +33,7 @@ llmgw$ podman exec -i postgres pg_restore -U litellm -d litellm --clean --if-exi
 - Disk: `llmgw$ podman system df`, `df -h /opt`.
 - Egress drops: `sudo journalctl -k --since -24h | grep llmgw-egress-drop` (expect none).
 - Spend: admin UI or `GET /global/spend/report` with the master key.
-- Host: `dnf-automatic` log (`journalctl -u dnf-automatic`), `auditctl -l`, `last -a`.
+- Host: `sudo dnf updateinfo --summary` (pending errata, see §6.8), `auditctl -l`, `last -a`.
 
 ## 6.3 Updating an image (the only supported way)
 
@@ -106,3 +106,25 @@ logged at zero cost.
   involved. Consider `fallbacks` in `litellm_settings` only as a deliberate decision.
 - Host compromise suspected: the containers run as `llmgw` without capabilities; check
   `sudo ausearch -k gateway -ts recent` and `sudo journalctl -k | grep llmgw-egress-drop`.
+
+## 6.8 Monthly OS patch window
+
+Automatic updates are off (D-21). Once a month, or sooner for a critical erratum that
+Satellite flags for this host:
+
+1. Check what is due: Satellite (Hosts > Content Hosts > `xbbovsrlllm001` > Errata) or
+   on the host `sudo dnf updateinfo --summary` and `sudo dnf -q check-update`.
+2. Take a VM snapshot.
+3. `sudo dnf upgrade`, read the transaction summary (kernel, selinux-policy, podman,
+   crun, systemd, glibc, openssh are the packages that matter), confirm.
+4. If `sudo needs-restarting -r` returns 1, reboot in a window: `sudo systemctl reboot`.
+   Otherwise `sudo needs-restarting` lists the services to restart; the containers are
+   restarted only if `podman`, `crun`, `conmon` or `netavark` changed
+   (`llmgw$ systemctl --user restart llmgw-litellm.service` etc., one at a time,
+   watching `podman ps` health).
+5. Verify: `uname -r`, `systemctl --failed`, `sudo /opt/traps/bin/cytool status` and
+   `runtime query` (agent supports the new kernel), `getenforce` = Enforcing with no new
+   AVCs (`sudo ausearch -m avc -ts boot`), §6.2 checks, one request through the gateway
+   (docs/05 §5.2).
+6. Delete the snapshot after a day of normal operation; record the date and kernel in
+   the change log.

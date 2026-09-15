@@ -182,19 +182,44 @@ openssh 9.9p1-25, systemd 257-23. `check-update` afterwards printed only two `Se
 notices (new kernel-core installed, older kernel-core running), which is informational:
 no package left to upgrade.
 
-Automatic security updates:
+Automatic updates are deliberately **not** enabled (D-21). The host is patched manually
+on a monthly window (docs/06 §6.8); applicable errata are visible per host in Satellite
+(Hosts > Content Hosts > errata) and on the host with `sudo dnf updateinfo --summary`.
+Podman is delivered through the same channel and, having no daemon, a package update
+never restarts the running containers; the next container start uses the new runtime.
+Container **images** are updated only deliberately (docs/06 §6.3).
+
+### 2.4.1 Reboot into the new kernel
+
+Kept separate from the SELinux relabel reboot (§2.1) so that a problem after either
+reboot has one candidate cause (D-20, amended). Before rebooting confirm which kernel
+will boot and record the XDR agent's state for comparison:
 
 ```bash
-sudo dnf -y install dnf-automatic
-sudo sed -i -e 's/^upgrade_type = .*/upgrade_type = security/' -e 's/^apply_updates = .*/apply_updates = yes/' /etc/dnf/automatic.conf
-sudo systemctl enable --now dnf-automatic.timer
+sudo grubby --default-kernel                  # /boot/vmlinuz-6.12.0-211.54.1.el10_2.x86_64
+sudo /opt/traps/bin/cytool runtime query      # note the values
+sudo needs-restarting -r; echo "rc=$?"        # 1 = reboot required, expected here
+sudo systemctl reboot
 ```
 
-Podman is delivered through the same channel and receives security fixes there; because
-it has no daemon, a package update never restarts the running containers. Container
-**images** are updated only deliberately (docs/06 §6.3). If the package source is an
-ISO or a one-off RPM bundle, there are no automatic updates: schedule a monthly manual
-refresh instead and record it.
+After it comes back (the journal is still volatile at this point, so the previous boot's
+log is gone; that is expected until §2.5):
+
+```bash
+uname -r; uptime
+systemctl --failed
+sudo journalctl -p err -b --no-pager | tail -n 20
+sudo /opt/traps/bin/cytool status
+sudo /opt/traps/bin/cytool runtime query
+sudo /opt/traps/bin/cytool last_checkin
+sudo subscription-manager identity
+systemctl is-active sshd rsyslog chronyd zabbix-agent traps_pmd
+ip -br address; chronyc tracking | grep -E '^(Reference|Leap)'
+```
+
+Expected: kernel `6.12.0-211.54.1.el10_2`, `0 loaded units listed` under `--failed`, the
+XDR agent running with the same protection state as before and a fresh check-in,
+identity unchanged, all five services active, `Leap status : Normal`.
 
 ## 2.5 Time, logging, audit
 
