@@ -169,6 +169,21 @@ relabel of §2.1 covers.
 sudo dnf -q check-update | grep -E '^(kernel|selinux-policy|systemd|glibc|openssh|podman|container)' 
 sudo dnf upgrade                              # review the transaction summary, then y
 rpm -q kernel selinux-policy-targeted | sort  # the newest kernel is installed alongside the running one
+cat /etc/redhat-release
+sudo dnf -q check-update | wc -l              # 0 once nothing is left
+```
+
+Result (2026-09-15, VM snapshot taken first): transaction of 300 upgrades, 8 installs
+and 5 removals (the oldest kernel, `6.12.0-55.9.1.el10_0`; dnf keeps three) moved the
+host from RHEL 10.1 to **10.2 (Coughlan)**. Kernels present afterwards:
+`6.12.0-124.21.1.el10_1`, `6.12.0-124.28.1.el10_1` (running) and
+`6.12.0-211.54.1.el10_2` (boots at the §2.1 reboot). Also upgraded: glibc 2.39-128,
+openssh 9.9p1-25, systemd 257-23. `check-update` still listed something afterwards
+(see below for the follow-up).
+
+Automatic security updates:
+
+```bash
 sudo dnf -y install dnf-automatic
 sudo sed -i -e 's/^upgrade_type = .*/upgrade_type = security/' -e 's/^apply_updates = .*/apply_updates = yes/' /etc/dnf/automatic.conf
 sudo systemctl enable --now dnf-automatic.timer
