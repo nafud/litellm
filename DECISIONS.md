@@ -284,3 +284,12 @@ lock and rsyslog are five-minute fixes of found defects, while the deferred item
 restrict access that is already limited to the internal network and the two admin
 accounts. The Cortex XDR kernel-module gap after the 10.2 kernel is a console-side item
 and does not block deployment.
+
+## D-23 /opt/llm-gateway on the root filesystem
+The host has one XFS root LV of 416 GB (405 GB free) across both virtual disks and no
+free extents in the volume group (docs/03 §3.3). A separate logical volume for the
+gateway would require attaching a new virtual disk; the isolation it offers (nothing
+under the gateway can fill `/`) is weak here because every component has a bounded
+size: pinned images only (no auto-pull), a small PostgreSQL, a 2 GB journal cap, and
+systemd resource ceilings (D-15). Kept on root. Revisit if the host ever hosts more than
+this stack or if the image store grows past tens of gigabytes.

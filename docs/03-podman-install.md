@@ -124,6 +124,16 @@ home labelled `user_home_dir_t`.
 
 ## 3.3 The /opt tree (server, as root)
 
+Disk layout verified 2026-09-15 before creating the tree: UEFI, `/boot/efi` (vfat 600 MB)
+and `/boot` (xfs 1 GB) on the 20 GB disk, root LV (xfs, 416 GB, 405 GB free) spanning
+that disk's LVM partition and the whole 400 GB second disk, 2 GB swap, volume group
+fully allocated; `/tmp` and `/dev/shm` tmpfs with `noexec,nosuid,nodev` (CIS kit).
+`/opt`, `/var`, `/var/log`, `/var/log/audit` and `/home` are on root, which CIS would
+want separate; XFS cannot shrink and the VG has no free extents, so only a reinstall
+would change that. Decision: `/opt/llm-gateway` stays on root (D-23); a dedicated LV
+would need a new virtual disk and buys little against 405 GB of headroom and fixed-size
+workloads.
+
 ```bash
 sudo mkdir -p /opt/llm-gateway/{litellm,presidio,postgres/data,network,bin,storage}
 sudo chown root:llmgw /opt/llm-gateway && sudo chmod 750 /opt/llm-gateway
