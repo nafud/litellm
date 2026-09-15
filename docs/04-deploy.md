@@ -138,10 +138,21 @@ except urllib.error.HTTPError as e: print(e.code)"                              
 Any HTTP status from the last command proves the TCP 443 path from the container; the
 provider itself is tested in docs/05 §5.7 once chosen.
 
-## 4.5 Reboot test, then enforcing
+## 4.5 Gateway audit rules, reboot test, then enforcing
+
+The audit configuration has been immutable since the docs/02 §2.1 reboot (`enabled 2`),
+so the gateway watches are added to `rules.d` now that every target exists, and this
+reboot loads them. Copy `deploy/host/llm-gateway.rules` with the tree (docs/03 §3.5) or
+paste it with a heredoc:
 
 ```bash
+sudo install -m 640 -o root -g root /tmp/host/llm-gateway.rules /etc/audit/rules.d/llm-gateway.rules
+for d in /etc/containers /opt/llm-gateway /home/llmgw/.config/containers /etc/nftables /etc/firewalld; do sudo test -d "$d" && echo "ok $d" || echo "MISSING $d"; done
+sudo augenrules --check          # "Rules have changed and should be updated"; it cannot load them now
 sudo reboot
+# after login:
+systemctl is-active audit-rules.service; sudo auditctl -s | grep -E '^enabled'                 # active, enabled 2
+sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'                         # 10
 # after login:
 sudo machinectl shell llmgw@
 llmgw$ systemctl --user list-units 'llmgw-*' && podman ps --format '{{.Names}}\t{{.Status}}'

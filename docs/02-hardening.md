@@ -98,13 +98,20 @@ backup must not stay there):
 sudo cp -a /etc/audit/rules.d/privileged.rules /root/privileged.rules.cis-2026-01
 sudo sh -c 'find / -xdev \( -perm -4000 -o -perm -2000 \) -type f 2>/dev/null | sort | awk "{print \"-a always,exit -F path=\" \$1 \" -F perm=x -F auid>=1000 -F auid!=unset -k privileged\"}" > /etc/audit/rules.d/privileged.rules'
 sudo diff /root/privileged.rules.cis-2026-01 /etc/audit/rules.d/privileged.rules   # host-specific list; the 12 dead paths go
-sudo install -m 640 -o root -g root /tmp/host/llm-gateway.rules /etc/audit/rules.d/llm-gateway.rules   # or paste it with a heredoc
-sudo chown root:root /etc/audit/rules.d/*.rules && sudo chmod 640 /etc/audit/rules.d/*.rules   # CIS files are owned by devops (docs/01 §1.11)
+sudo sh -c 'chown root:root /etc/audit/rules.d/*.rules && chmod 640 /etc/audit/rules.d/*.rules'   # CIS files are owned by devops (docs/01 §1.11); the glob must expand as root
 sudo augenrules --check                                                   # "Rules have changed and should be updated"
-sudo augenrules --load; echo "rc=$?"                                      # rc=0 this time
-sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'   # 10
+sudo augenrules --load 2>&1 | grep -vE 'slower$'; echo "rc=${PIPESTATUS[0]}"   # no "error in line", rc=0
 sudo auditctl -s | grep -E '^(enabled|failure)'                          # enabled 2: the CIS lock is now in effect
+sudo auditctl -l | wc -l
 ```
+
+The gateway rules (`deploy/host/llm-gateway.rules`) are **not** loaded here. Three of
+their targets (`/etc/containers`, `/opt/llm-gateway`, the `llmgw` home) do not exist
+before phase 3; a watch on a missing directory is installed as a plain file watch, not
+the recursive directory watch intended, and a watch whose parent directory is missing
+is rejected outright (first attempt on 2026-09-15: `/home/llmgw/.config/containers/`
+stopped the load at line 59). They are installed at docs/04 §4.5, whose reboot loads
+them.
 
 From this point the running audit configuration is immutable (`-e 2` reached the
 kernel for the first time): `auditctl` refuses changes and `audit-rules.service` keeps
@@ -124,7 +131,7 @@ After the reboot (the relabel of a 400 GB volume with little data takes a few mi
 getenforce                          # Permissive
 ls -Z /etc/passwd /opt /home/infosec                # labels instead of "?"
 sudo ausearch -m AVC,USER_AVC -ts boot | tail -20   # denials since boot; expect none or only noise
-sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'   # 10: the new rules loaded
+systemctl is-active audit-rules.service; sudo auditctl -s | grep -E '^enabled'   # active, enabled 2
 sudo /opt/traps/bin/cytool status | head -5          # XDR agent still healthy
 ```
 
@@ -310,8 +317,10 @@ sudo systemctl restart systemd-journald && journalctl --disk-usage && ls -ld /va
 ```bash
 systemctl is-active audit-rules.service              # active
 sudo auditctl -s | grep -E '^(enabled|pid|lost)'     # enabled 2
-sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'   # 10
 ```
+
+  The gateway watches (`llm-gateway.rules`) follow in docs/04 §4.5, once their targets
+  exist.
 
 - sudo: CIS left the defaults; `Defaults use_pty` and `Defaults logfile=/var/log/sudo.log`
   are optional additions (the SIEM already receives `authpriv`).
