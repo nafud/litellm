@@ -15,9 +15,10 @@ host was registered to it before (the capsule CA package, `redhat.repo`, `rhc` a
 direct registration with Red Hat is impossible here (the firewall decrypts TLS to the
 Red Hat hosts, and `cdn.redhat.com` authenticates clients with certificates).
 
-**Option A (recommended): register to the Satellite.** Needed from the Satellite owner
-(the `devops` team): the organisation name and an activation key whose content view
-carries RHEL 10 BaseOS and AppStream. The hostname must be set first (docs/02 §2.0).
+**Option A (decided, docs/01 §1.14): register to the Satellite.** Run in phase 2 right
+after docs/02 §2.0 sets the hostname. Needed from the Satellite owner (the `devops`
+team): the organisation name and an activation key whose content view carries RHEL 10
+BaseOS and AppStream.
 
 The host's previous record was deleted on the Satellite (rhsm log: `410 Gone`, docs/01
 §1.9), so the local identity is stale; `clean` removes it (consumer certificate, cached

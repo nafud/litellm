@@ -18,15 +18,31 @@ playbook run does not revert it. And the Cortex XDR agent (`traps_pmd.service`,
 `/opt/traps`) is never stopped, modified or excluded from the relabel; it supports
 SELinux enforcing on RHEL.
 
+Sequence for this phase, one step per session with its verification: §2.0 hostname,
+then Satellite registration (docs/03 §3.0, brought forward so that §2.4 can update the
+system), §2.4 updates, §2.5 logging and audit rules, §2.1 SELinux with the one reboot
+that also boots the updated kernel and relabels, then §2.2, §2.3 SSH, §2.6, §2.7, §2.8.
+
 ## 2.0 Hostname
 
-The host is `localhost`. Satellite registration (docs/03 §3.0), the SIEM, Zabbix and the
-audit trail all need a stable name; agree the FQDN first (docs/01 question 8):
+The host is `localhost`. Satellite registration, the SIEM, Zabbix and the audit trail all
+need a stable name. Decided (docs/01 §1.14): `xbbovsrlllm001.xalqbank.az`. The name goes
+into `/etc/hosts` as well so that `hostname -f` resolves before the DNS team adds the
+A record (request that record now; nothing here waits for it):
 
 ```bash
-sudo hostnamectl set-hostname <name>.xalqbank.az
-hostnamectl; hostname -f
+sudo hostnamectl set-hostname xbbovsrlllm001.xalqbank.az
+echo '10.50.4.68 xbbovsrlllm001.xalqbank.az xbbovsrlllm001' | sudo tee -a /etc/hosts
+hostnamectl --static; hostname -f; getent hosts xbbovsrlllm001.xalqbank.az
+sudo ausearch -k system-locale -ts recent | grep -c sethostname     # the CIS audit rule recorded the change: 1 or more
 ```
+
+Expected: the static name and `hostname -f` both print `xbbovsrlllm001.xalqbank.az`, and
+`getent` prints `10.50.4.68`. The shell prompt shows the new name at the next login;
+rsyslog and the journal use it immediately. The Zabbix agent's `Hostname=` line is not
+touched: passive checks from 10.100.7.150 do not use it.
+
+Then register to the Satellite: docs/03 §3.0, option A. Continue with §2.4.
 
 ## 2.1 SELinux: re-enable (currently Disabled)
 
@@ -92,13 +108,17 @@ If something is denied later, read the denial rather than lowering the mode:
 ## 2.3 SSH
 
 Install a key for `infosec` and confirm key login works before turning password login
-off:
+off. The workstation is Windows; its OpenSSH client has no `ssh-copy-id`, so the public
+key is appended by hand (PowerShell):
 
-```bash
-# from the workstation (generate a key if there is none: ssh-keygen -t ed25519)
-ssh-copy-id infosec@10.50.4.68
-ssh -o PasswordAuthentication=no infosec@10.50.4.68 true && echo "key login OK"
+```powershell
+if (-not (Test-Path $env:USERPROFILE\.ssh\id_ed25519.pub)) { ssh-keygen -t ed25519 }
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh infosec@10.50.4.68 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+ssh -o PasswordAuthentication=no infosec@10.50.4.68 true; if ($LASTEXITCODE -eq 0) { "key login OK" }
 ```
+
+Protect the private key with a passphrase when `ssh-keygen` asks; it is now the only
+way into the account.
 
 Then, on the server. The CIS Build Kit already wrote most of the hardening into
 `/etc/ssh/sshd_config` above the `Include` line, where it wins over every drop-in

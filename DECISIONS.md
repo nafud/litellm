@@ -247,3 +247,15 @@ entries and the real round trip are phase 7 (docs/05 §5.7). Consequences: `conf
 ships only `mock-echo` plus commented examples of the entry shape; `litellm.env` has no
 provider variable yet; the egress rule stays `tcp dport 443` to any address until a
 provider exists to narrow it to.
+
+## D-20 Hostname and phase 2 sequence
+Hostname `xbbovsrlllm001.xalqbank.az`, following the company pattern seen on the host
+(`xbbovsransb001`); the owner's first proposal carried the IP address inside the name,
+which is invalid (dots are label separators, an all-digit last label) and brittle. The
+address is kept in `/etc/hosts` until DNS carries it. Phase 2 runs in this order:
+hostname, Satellite registration (brought forward from phase 3 so the system can be
+updated first), updates, logging and audit rules, then the single reboot that boots the
+updated kernel, relabels and brings SELinux to permissive; SSH, sysctl and firewalls
+after it. Because the workstation is Windows, `.gitattributes` pins LF line endings for
+every file (CRLF would break the units, scripts and YAML on the server) and the key is
+installed without `ssh-copy-id`.

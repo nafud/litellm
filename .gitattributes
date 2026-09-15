@@ -1,0 +1,6 @@
+# The workstation is Windows (docs/01 question 7). Every file that reaches the server must
+# keep LF line endings: Quadlet units, shell scripts, YAML, env templates and nft rules
+# break with CRLF. Git normalises on checkout regardless of core.autocrlf.
+* text=auto eol=lf
+*.png binary
+*.pdf binary

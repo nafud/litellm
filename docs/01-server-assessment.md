@@ -388,3 +388,17 @@ the summary (pass/fail counts per section); then `rm /tmp/cis-report.html` on th
 | CIS-CAT report | fetched by the owner, `/tmp` copy removed | Summary to be pasted when convenient; not blocking |
 
 Phase 1 is complete with this round. Everything else is a decision (§1.3).
+
+## 1.14 Decisions taken by the owner (2026-09-15)
+
+| Question | Decision |
+|----------|----------|
+| 1 Package source | Satellite registration, after the hostname is set. Activation key and organisation name to be obtained from the infrastructure team |
+| 2 SELinux | Re-enable (D-17) |
+| 3 rsyslog 514 | Remove the unused receiver; keep the SIEM forwarder |
+| 4 `devops` | Keep, unchanged; the team is informed of phase 2 changes |
+| 5 SSH source ranges | still open: which ranges the owner and the automation hosts connect from |
+| 7 Workstation | Windows (PowerShell); the built-in OpenSSH client provides `ssh`, `scp`, `ssh-keygen`; there is no `ssh-copy-id`. `.gitattributes` forces LF line endings so a Windows checkout does not corrupt the files copied to the server |
+| 8 Hostname | `xbbovsrlllm001.xalqbank.az`, following the company pattern (`xbbovsransb001`). The owner's first proposal embedded the IP address; dots inside a hostname are label separators and an all-digit last label is invalid, so the address stays in DNS and `/etc/hosts` |
+| 8b XDR 33221 | No inbound rule; `cytool status` checked after firewalld comes up |
+| CIS-CAT baseline (2026-01-13) | 881 pass, 146 fail, 34 manual, 1 error (result cells counted in the HTML report; the file stays outside the repository) |
