@@ -178,8 +178,9 @@ and 5 removals (the oldest kernel, `6.12.0-55.9.1.el10_0`; dnf keeps three) move
 host from RHEL 10.1 to **10.2 (Coughlan)**. Kernels present afterwards:
 `6.12.0-124.21.1.el10_1`, `6.12.0-124.28.1.el10_1` (running) and
 `6.12.0-211.54.1.el10_2` (boots at the §2.1 reboot). Also upgraded: glibc 2.39-128,
-openssh 9.9p1-25, systemd 257-23. `check-update` still listed something afterwards
-(see below for the follow-up).
+openssh 9.9p1-25, systemd 257-23. `check-update` afterwards printed only two `Security:`
+notices (new kernel-core installed, older kernel-core running), which is informational:
+no package left to upgrade.
 
 Automatic security updates:
 
