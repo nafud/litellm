@@ -71,13 +71,29 @@ The Red Hat procedure for a system that has been running without SELinux: go to
 **permissive** first, force a full relabel at the next boot, reboot, look for denials,
 then switch to enforcing. The audit rules of §2.5 are installed before this same reboot
 (the CIS `99-finalize.rules` carries `-e 2`; the runtime was mutable on 2026-09-14, but
-loading them here means one verification after the reboot covers both):
+loading them here means one verification after the reboot covers both).
+
+**Finding (2026-09-15, after the kernel reboot):** `audit-rules.service` fails at boot,
+and has done so since the CIS run. `privileged.rules` is a generic CIS list; twelve of
+its `-F path=` entries do not exist on this host, and one of them
+(`/usr/libexec/dbus-1/dbus-daemon-launch-helper`, dbus-daemon was never installed) has
+no parent directory, which the kernel rejects. `augenrules` stops at that line (79 of
+81), so the rule after it and the `-e 2` lock never loaded, which is why the runtime was
+still `enabled 1`. The fix is the one CIS prescribes for that control: generate the list
+from the setuid/setgid binaries actually present, keeping the original file outside
+`rules.d` for reference (augenrules merges every `*.rules` in that directory, so a
+backup must not stay there):
 
 ```bash
+sudo cp -a /etc/audit/rules.d/privileged.rules /root/privileged.rules.cis-2026-01
+sudo sh -c 'find / -xdev \( -perm -4000 -o -perm -2000 \) -type f 2>/dev/null | sort | awk "{print \"-a always,exit -F path=\" \$1 \" -F perm=x -F auid>=1000 -F auid!=unset -k privileged\"}" > /etc/audit/rules.d/privileged.rules'
+sudo diff /root/privileged.rules.cis-2026-01 /etc/audit/rules.d/privileged.rules   # host-specific list; the 12 dead paths go
 sudo install -m 640 -o root -g root /tmp/host/llm-gateway.rules /etc/audit/rules.d/llm-gateway.rules
 sudo chown root:root /etc/audit/rules.d/*.rules && sudo chmod 640 /etc/audit/rules.d/*.rules   # CIS files are owned by devops (docs/01 §1.11)
 sudo augenrules --check                                                   # "Rules have changed and should be updated"
-sudo augenrules --load && sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'   # 10 (runtime is mutable, docs/01 §1.13)
+sudo augenrules --load; echo "rc=$?"                                      # rc=0 this time; runtime is mutable (docs/01 §1.13)
+sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'   # 10
+sudo systemctl restart audit-rules.service && systemctl is-active audit-rules.service   # active
 sudo sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
 grep -E '^SELINUX=' /etc/selinux/config                                  # SELINUX=permissive
 sudo fixfiles -F onboot            # creates /.autorelabel; the relabel runs during the next boot
