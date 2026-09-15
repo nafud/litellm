@@ -16,19 +16,38 @@ direct registration with Red Hat is impossible here (the firewall decrypts TLS t
 Red Hat hosts, and `cdn.redhat.com` authenticates clients with certificates).
 
 **Option A (decided, docs/01 §1.14): register to the Satellite.** Run in phase 2 right
-after docs/02 §2.0 sets the hostname. Needed from the Satellite owner (the `devops`
-team): the organisation name and an activation key whose content view carries RHEL 10
-BaseOS and AppStream.
+after docs/02 §2.0 sets the hostname and `/etc/hosts` (the Satellite records the name
+the host reports at registration time). The Satellite administrator generates a
+"global registration" command in the Satellite UI (Hosts, Register Host): a `curl` of
+`https://satellite.xalqbank.az/register?...` with a bearer token valid for four hours,
+piped to `bash`. It carries the activation key, host group, location, organisation and
+operating system chosen by the administrator; `update_packages=false` leaves the
+update to docs/02 §2.4. The token is a secret: never in the repository or a chat log.
 
-The host's previous record was deleted on the Satellite (rhsm log: `410 Gone`, docs/01
-§1.9), so the local identity is stale; `clean` removes it (consumer certificate, cached
-entitlements and facts, nothing else) before a fresh registration:
+Run it in a reviewable form rather than `curl | bash`: fetch the script with the
+Satellite CA that is already installed instead of `--insecure`, read it, then run it as
+root. The host's previous record was deleted on the Satellite (rhsm log `410 Gone`,
+docs/01 §1.9), so the stale local identity is cleaned first (consumer certificate,
+cached entitlements and facts, nothing else):
 
 ```bash
-grep -E '^(hostname|prefix|baseurl)\s*=' /etc/rhsm/rhsm.conf         # capsule.xalqbank.az, /rhsm, https://capsule.xalqbank.az/pulp/content
+getent hosts satellite.xalqbank.az
+curl -sS --cacert /etc/rhsm/ca/katello-server-ca.pem -o /dev/null -w 'satellite HTTP %{http_code}\n' --max-time 8 https://satellite.xalqbank.az/
 sudo subscription-manager clean
-sudo subscription-manager register --org="<organisation>" --activationkey="<key>"
+curl -sS --cacert /etc/rhsm/ca/katello-server-ca.pem -o /tmp/register.sh 'https://satellite.xalqbank.az/register?<parameters as generated>' --header 'Authorization: Bearer <token>'
+less /tmp/register.sh                     # what it does: installs the CA RPM, registers with the activation key, enables repositories
+sudo bash /tmp/register.sh && rm -f /tmp/register.sh
+```
+
+If the first `curl` fails with a certificate error, the Satellite uses a different CA
+than the capsule; then, and only then, `--insecure` for the two fetches is the
+bootstrap the Satellite documentation itself prescribes (the script installs the
+proper CA). Verification:
+
+```bash
 sudo subscription-manager identity                                     # system identity, org name
+sudo subscription-manager status | head -3
+grep -E '^(hostname|baseurl)\s*=' /etc/rhsm/rhsm.conf                   # satellite or capsule: the administrator's choice via the host group
 sudo subscription-manager repos --list-enabled | grep -E '^Repo ID'   # rhel-10-for-x86_64-baseos-rpms, rhel-10-for-x86_64-appstream-rpms
 sudo dnf repolist && sudo dnf -q check-update | head -5
 ```
