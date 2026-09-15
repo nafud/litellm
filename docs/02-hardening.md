@@ -51,7 +51,12 @@ Expected: `hostnamectl --static` prints `xbbovsrlllm001`, `hostname -f` prints
 rsyslog and the journal use it immediately. The Zabbix agent's `Hostname=` line is not
 touched: passive checks from 10.100.7.150 do not use it.
 
-Then register to the Satellite: docs/03 §3.0, option A. Continue with §2.4.
+Then register to the Satellite: docs/03 §3.0, option A. Done 2026-09-15: identity under
+organisation `XALQ_BANK_OSJ`, environment `Library`, `rhsm.conf` pointing at
+`satellite.xalqbank.az`, BaseOS and AppStream enabled, about 300 updates pending. The
+Satellite recorded the short host name (`subscription-manager` reports the kernel
+hostname); rename it in the Satellite UI if the convention there is FQDNs. Continue
+with §2.4.
 
 ## 2.1 SELinux: re-enable (currently Disabled)
 
@@ -155,8 +160,15 @@ is in place (D-10). Cipher and MAC lists come from the crypto policy
 Depends on docs/03 §3.0 (Satellite registration). Once `dnf repolist` shows the RHEL 10
 BaseOS and AppStream repositories from the capsule:
 
+First see what the update contains, in particular the kernel and the SELinux policy
+(both matter for the §2.1 reboot), then apply it. No reboot here: the §2.1 reboot boots
+the new kernel. Files installed while SELinux is disabled are unlabeled, which the
+relabel of §2.1 covers.
+
 ```bash
-sudo dnf -y upgrade && sudo reboot            # if a kernel or glibc update was applied
+sudo dnf -q check-update | grep -E '^(kernel|selinux-policy|systemd|glibc|openssh|podman|container)' 
+sudo dnf upgrade                              # review the transaction summary, then y
+rpm -q kernel selinux-policy-targeted | sort  # the newest kernel is installed alongside the running one
 sudo dnf -y install dnf-automatic
 sudo sed -i -e 's/^upgrade_type = .*/upgrade_type = security/' -e 's/^apply_updates = .*/apply_updates = yes/' /etc/dnf/automatic.conf
 sudo systemctl enable --now dnf-automatic.timer
