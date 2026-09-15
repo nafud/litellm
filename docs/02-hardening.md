@@ -30,15 +30,24 @@ need a stable name. Decided (docs/01 §1.14): `xbbovsrlllm001.xalqbank.az`. The 
 into `/etc/hosts` as well so that `hostname -f` resolves before the DNS team adds the
 A record (request that record now; nothing here waits for it):
 
+Step 1, the static name (the owner chose the short form; the domain comes from step 2):
+
 ```bash
-sudo hostnamectl set-hostname xbbovsrlllm001.xalqbank.az
+sudo hostnamectl set-hostname xbbovsrlllm001
+hostnamectl --static
+```
+
+Step 2, the name and domain in `/etc/hosts`, so that `hostname -f` and the Satellite see
+the FQDN:
+
+```bash
 echo '10.50.4.68 xbbovsrlllm001.xalqbank.az xbbovsrlllm001' | sudo tee -a /etc/hosts
-hostnamectl --static; hostname -f; getent hosts xbbovsrlllm001.xalqbank.az
+hostname -f; getent hosts xbbovsrlllm001
 sudo ausearch -k system-locale -ts recent | grep -c sethostname     # the CIS audit rule recorded the change: 1 or more
 ```
 
-Expected: the static name and `hostname -f` both print `xbbovsrlllm001.xalqbank.az`, and
-`getent` prints `10.50.4.68`. The shell prompt shows the new name at the next login;
+Expected: `hostnamectl --static` prints `xbbovsrlllm001`, `hostname -f` prints
+`xbbovsrlllm001.xalqbank.az`, and `getent` prints `10.50.4.68`. The shell prompt shows the new name at the next login;
 rsyslog and the journal use it immediately. The Zabbix agent's `Hostname=` line is not
 touched: passive checks from 10.100.7.150 do not use it.
 
