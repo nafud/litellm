@@ -95,6 +95,10 @@ sudo ausearch -m AVC -ts recent | tail -5      # SELinux is permissive at this p
 Expect Podman 5.x. The Quadlet keys used by the units were checked against the 5.4 and
 5.6 manual pages (`podman-systemd.unit(5)`); the key table is identical in both.
 
+Result (2026-09-15): podman 5.8.2, netavark 1.17.2, aardvark-dns 1.17.1, crun 1.27,
+conmon 2.2.1, passt 20251210, container-selinux 2.248.0, skopeo 1.22.2; `/etc/containers`
+labelled `etc_t`, `/var/lib/containers` `container_var_lib_t`.
+
 ## 3.2 Service account (server)
 
 ```bash
@@ -114,6 +118,9 @@ ls /var/lib/systemd/linger/                       # llmgw listed
   keep running after the admin logs out.
 - `/bin/bash` is needed to operate the stack as this user; SSH login stays impossible
   (no password, not in `AllowUsers`).
+
+Result (2026-09-15): uid 989, gid 988, subuid and subgid `655360:65536`, linger enabled,
+home labelled `user_home_dir_t`.
 
 ## 3.3 The /opt tree (server, as root)
 
@@ -138,6 +145,7 @@ executable bit of the scripts; the env templates are copied as templates only (t
 files are created in docs/04 §4.1):
 
 ```bash
+grep -rl $'\r' /tmp/opt /tmp/llmgw; echo "crlf-check rc=$?"   # must print nothing, rc=1: a checkout made before .gitattributes may carry CRLF
 sudo cp -a /tmp/opt/. /opt/llm-gateway/
 sudo chown -R llmgw:llmgw /opt/llm-gateway/{litellm,presidio,postgres,network,bin}
 sudo install -d -m 700 -o llmgw -g llmgw /home/llmgw/.config/containers
@@ -156,11 +164,13 @@ must see it as if it were the default location; this is the procedure from
 `containers-storage.conf(5)` for rootless mode:
 
 ```bash
+rpm -q policycoreutils-python-utils || sudo dnf -y install policycoreutils-python-utils
 sudo semanage fcontext -a -e /home/llmgw/.local/share/containers /opt/llm-gateway/storage
 sudo restorecon -R -v /opt/llm-gateway/storage
+sudo semanage fcontext -l -C            # the equivalence is listed under local customizations
 ```
 
-(`semanage` is in `policycoreutils-python-utils`, already installed.) The equivalence is
+(`semanage` is in `policycoreutils-python-utils`.) The equivalence is
 recorded in the SELinux policy store, so it survives relabels and reboots.
 
 ## 3.6 Working as the service account (server)
