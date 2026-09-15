@@ -272,3 +272,15 @@ the next container restart). Applicable errata remain visible per host in Satell
 the owner still sees what is due. Depends on the window actually happening; if that
 proves unreliable, the fallback is `dnf-automatic` in notify-only mode
 (`apply_updates = no`, `emit_via = motd`), never auto-apply.
+
+## D-22 Hardening scope before deployment
+The owner closed phase 2 on 2026-09-15 with SELinux (relabel reboot), the audit-rules
+fix and the rsyslog audit forwarding as the only remaining pre-deployment items. SSH
+key-only login, the sysctl file, firewalld and the egress filter are deferred until the
+gateway runs (after phase 5), when the SSH source ranges are known and the exposed ports
+are real rather than planned. Reasoning: SELinux must precede Podman (labels are set at
+install time; a later relabel plus enforcing on a running stack is riskier), the audit
+lock and rsyslog are five-minute fixes of found defects, while the deferred items
+restrict access that is already limited to the internal network and the two admin
+accounts. The Cortex XDR kernel-module gap after the 10.2 kernel is a console-side item
+and does not block deployment.

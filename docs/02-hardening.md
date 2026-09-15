@@ -20,8 +20,18 @@ SELinux enforcing on RHEL.
 
 Sequence for this phase, one step per session with its verification: §2.0 hostname,
 then Satellite registration (docs/03 §3.0, brought forward so that §2.4 can update the
-system), §2.4 updates, §2.5 logging and audit rules, §2.1 SELinux with the one reboot
-that also boots the updated kernel and relabels, then §2.2, §2.3 SSH, §2.6, §2.7, §2.8.
+system), §2.4 updates and the kernel reboot (§2.4.1), §2.5 logging, §2.1 audit rules and
+SELinux with the relabel reboot. Done up to and including §2.4.1 on 2026-09-15.
+
+**Deferred to after phase 5 (owner decision 2026-09-15, D-22):** §2.2/§2.3 SSH key
+login and the sshd drop-in, §2.6 sysctl, §2.7 firewalld (still needs the SSH source
+ranges) and §2.8 egress. None of them is a prerequisite for the deployment; SELinux,
+the audit fix and rsyslog are, and they close the phase for now. Open on the XDR side:
+the agent's kernel module is not loaded on the new kernel (`cytool status`: Anti
+Malware and DSE "Kernel Not Supported", pmd log "KM is loaded? false", BPF collection
+disabled by policy); resolved in the Cortex console, either by the content update that
+adds kernel `6.12.0-211` or by enabling the Km-to-BPF fallback in the agent settings
+profile. Nothing on the host changes it.
 
 ## 2.0 Hostname
 
@@ -88,12 +98,20 @@ backup must not stay there):
 sudo cp -a /etc/audit/rules.d/privileged.rules /root/privileged.rules.cis-2026-01
 sudo sh -c 'find / -xdev \( -perm -4000 -o -perm -2000 \) -type f 2>/dev/null | sort | awk "{print \"-a always,exit -F path=\" \$1 \" -F perm=x -F auid>=1000 -F auid!=unset -k privileged\"}" > /etc/audit/rules.d/privileged.rules'
 sudo diff /root/privileged.rules.cis-2026-01 /etc/audit/rules.d/privileged.rules   # host-specific list; the 12 dead paths go
-sudo install -m 640 -o root -g root /tmp/host/llm-gateway.rules /etc/audit/rules.d/llm-gateway.rules
+sudo install -m 640 -o root -g root /tmp/host/llm-gateway.rules /etc/audit/rules.d/llm-gateway.rules   # or paste it with a heredoc
 sudo chown root:root /etc/audit/rules.d/*.rules && sudo chmod 640 /etc/audit/rules.d/*.rules   # CIS files are owned by devops (docs/01 §1.11)
 sudo augenrules --check                                                   # "Rules have changed and should be updated"
-sudo augenrules --load; echo "rc=$?"                                      # rc=0 this time; runtime is mutable (docs/01 §1.13)
+sudo augenrules --load; echo "rc=$?"                                      # rc=0 this time
 sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'   # 10
-sudo systemctl restart audit-rules.service && systemctl is-active audit-rules.service   # active
+sudo auditctl -s | grep -E '^(enabled|failure)'                          # enabled 2: the CIS lock is now in effect
+```
+
+From this point the running audit configuration is immutable (`-e 2` reached the
+kernel for the first time): `auditctl` refuses changes and `audit-rules.service` keeps
+its failed state until the reboot, which is the next step anyway. Every later rule
+change goes into `rules.d` and needs a reboot to load.
+
+```bash
 sudo sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
 grep -E '^SELINUX=' /etc/selinux/config                                  # SELINUX=permissive
 sudo fixfiles -F onboot            # creates /.autorelabel; the relabel runs during the next boot
@@ -239,12 +257,43 @@ identity unchanged, all five services active, `Leap status : Normal`.
 
 ## 2.5 Time, logging, audit
 
-- `timedatectl` shows `System clock synchronized: yes` (chronyd is active; confirm it
-  reaches its sources: `chronyc sources`).
-- Journal: it is volatile on this host (`/var/log/journal` does not exist, docs/01
-  §1.11), so every reboot discards it. Container logs go to the journal
-  (`LogDriver=journald`) and so do the `llmgw` user's units; make it persistent and
-  capped:
+Order on the host: rsyslog, journal, then the audit rules of §2.1 and the reboot.
+
+- `timedatectl` shows `System clock synchronized: yes` (chronyd is active, sources
+  ntp2/ntp3.xalqbank.az, `Leap status : Normal` after the kernel reboot).
+- **rsyslog. Finding (2026-09-15):** `/etc/rsyslog.conf` ships `audit.log` to the SIEM
+  with the legacy `$InputFile*` directives but never loads `imfile`, so rsyslog has
+  rejected that block since it was written ("invalid or yet-unknown config file
+  command"); `/var/lib/rsyslog/` holds only `imjournal.state`, never the `audit_log`
+  state file. Syslog reached `linux-mon.xalqbank.az` all along, the audit trail did not.
+  The same file runs the unused receiver on 514 (`$ModLoad imtcp`,
+  `$InputTCPServerRun 514`, listening on all addresses). The file is not managed by
+  Ansible (docs/01 §1.8). Fix: drop the eight legacy lines, add the input in current
+  syntax as a drop-in (same tag and facility, so the SIEM parser is unchanged), keep the
+  forwarding line:
+
+```bash
+sudo cp -a /etc/rsyslog.conf /root/rsyslog.conf.2026-09-15
+sudo sed -i -E '/^\$(InputFileName|InputFileTag|InputFileStateFile|InputFileSeverity|InputFileFacility|InputRunFileMonitor|ModLoad imtcp|InputTCPServerRun)\b/d' /etc/rsyslog.conf
+sudo diff /root/rsyslog.conf.2026-09-15 /etc/rsyslog.conf          # exactly eight lines removed
+printf 'module(load="imfile")\ninput(type="imfile" File="/var/log/audit/audit.log" Tag="tag_audit_log:" Severity="info" Facility="local6")\n' | sudo tee /etc/rsyslog.d/10-audit-imfile.conf
+sudo rsyslogd -N1                                                    # ends "End of config validation run. Bye."; no "invalid" lines
+sudo systemctl restart rsyslog && systemctl is-active rsyslog
+ss -tlnp | grep -E ':514\b'                                          # nothing
+sudo ls /var/lib/rsyslog/                                            # imjournal.state plus an imfile-state: file
+sudo journalctl -u rsyslog -b --no-pager | tail -n 5                # no errors
+```
+
+  The `.rpmnew` left by the upgrade only rewrites the local file actions in the new
+  syntax; nothing in it is needed. Two things for the SIEM team, not changed here: with a
+  plain `@@` action, messages are dropped while the collector is unreachable (a
+  disk-assisted queue on that action fixes it), and with SELinux enforcing rsyslog needs
+  read access to `auditd_log_t`; any denial shows in permissive mode (§2.1) and the
+  audisp `syslog` plugin is the alternative if the policy refuses it.
+- **Journal:** volatile on this host (`/var/log/journal` absent, docs/01 §1.11), so every
+  reboot discards it, including the boot that just happened. Container logs go to the
+  journal (`LogDriver=journald`) and so do the `llmgw` user's units; make it persistent
+  and capped:
 
 ```bash
 sudo install -d -m 755 -o root -g root /etc/systemd/journald.conf.d
@@ -253,31 +302,19 @@ sudo mkdir -p /var/log/journal && sudo systemd-tmpfiles --create --prefix /var/l
 sudo systemctl restart systemd-journald && journalctl --disk-usage && ls -ld /var/log/journal
 ```
 
-  rsyslog keeps forwarding to the SIEM through `imjournal` regardless.
-- rsyslog forwards everything to the SIEM (`*.* @@linux-mon.xalqbank.az`) and ships
-  `audit.log` through `imfile`; both stay, and container logs reach the SIEM through
-  `imjournal`. It also runs an unused receiver (`$ModLoad imtcp`,
-  `$InputTCPServerRun 514`). Unless the SIEM team wants this host to relay, remove those
-  two lines (in the playbook if Ansible owns the file, docs/01 §1.8 block B), then
-  `sudo rsyslogd -N1 && sudo systemctl restart rsyslog` and confirm `ss -tlnp` no longer
-  shows 514. If it stays, restrict the source in firewalld (§2.7).
-- Audit: the CIS rule set is in place (`50-*.rules`, `privileged.rules`, docs/01
-  §1.11) with `-e 2` in `99-finalize.rules`. The gateway rules and the ownership fix
-  (CIS files owned by `devops`) were loaded in §2.1. Verify after the reboot, and note
-  the `enabled` value: `2` means the boot made the configuration immutable and any
-  later audit change needs another reboot:
+- **Audit:** the CIS rule set is in `rules.d`, but `privileged.rules` stops the load at
+  boot (finding in §2.1, where the fix and the gateway rules are applied). Verify after
+  the reboot; `enabled 2` means the configuration is immutable and any later change
+  needs a reboot:
 
 ```bash
-sudo auditctl -s | grep -E '^(enabled|pid|lost)'
-sudo auditctl -l | grep -E 'gateway|firewall|subid'
-sudo stat -c '%U:%G %a %n' /etc/audit/rules.d/*.rules      # root:root 640
+systemctl is-active audit-rules.service              # active
+sudo auditctl -s | grep -E '^(enabled|pid|lost)'     # enabled 2
+sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'   # 10
 ```
 
-- sudo: stock `Defaults`; sudo events already reach the SIEM via authpriv. Optional CIS
-  items, not needed by the deployment: `Defaults use_pty` and
-  `Defaults logfile="/var/log/sudo.log"` in `/etc/sudoers.d/10-logging` (`visudo -cf`
-  before installing); the CIS audit watch on `/var/log/sudo.log` only makes sense with
-  the second one.
+- sudo: CIS left the defaults; `Defaults use_pty` and `Defaults logfile=/var/log/sudo.log`
+  are optional additions (the SIEM already receives `authpriv`).
 
 ## 2.6 Kernel parameters
 
