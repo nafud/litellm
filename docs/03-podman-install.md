@@ -169,12 +169,17 @@ grep -rl $'\r' /tmp/opt /tmp/llmgw; echo "crlf-check rc=$?"   # must print nothi
 sudo cp -r --no-preserve=all /tmp/opt/. /opt/llm-gateway/
 sudo chown -R llmgw:llmgw /opt/llm-gateway/{litellm,presidio,postgres,network,bin}
 sudo chmod 750 /opt/llm-gateway/bin/link-quadlets.sh /opt/llm-gateway/bin/pull-images.sh
-sudo install -d -m 700 -o llmgw -g llmgw /home/llmgw/.config/containers
+sudo install -d -m 700 -o llmgw -g llmgw /home/llmgw/.config /home/llmgw/.config/containers
 sudo install -m 600 -o llmgw -g llmgw /tmp/llmgw/storage.conf /home/llmgw/.config/containers/storage.conf
 rm -rf /tmp/opt /tmp/llmgw
+sudo restorecon -R -v /opt/llm-gateway        # prints nothing when labels are already right
 sudo find /opt/llm-gateway -maxdepth 2 -printf '%M %u:%g %p\n'
-sudo ls -l /home/llmgw/.config/containers/
+sudo ls -ldZ /home/llmgw/.config /home/llmgw/.config/containers /home/llmgw/.config/containers/storage.conf
 ```
+
+`install -d` applies `-o/-g` only to the directories it is given, so `.config` is
+named explicitly; a root-owned `.config` makes podman refuse to start ("exists and it is
+not owned by the current user").
 
 Repeating this after any change in the repository is the update path (docs/06): download
 the ZIP again, `scp`, CRLF check, the same `cp`, chmod, restart the affected unit.
@@ -182,7 +187,10 @@ the ZIP again, `scp`, CRLF check, the same `cp`, chmod, restart the affected uni
 Result (2026-09-16): the first run used `cp -a`, which set `/opt/llm-gateway` to
 `infosec:infosec 700` and the four 750 subdirectories to 700, and the glob chmod failed
 as described; files were all correct. Repaired with the §3.3 chown/chmod lines and the
-explicit chmod of the two scripts; procedure above corrected.
+explicit chmod of the two scripts. The same `cp -a` also carried the `user_tmp_t` label
+of the `/tmp` tree onto `/opt/llm-gateway` (fixed with `restorecon -R`), and `.config`
+had been created root-owned (fixed with `chown llmgw:llmgw` + `chmod 700`). Procedure
+above corrected on all three points.
 
 ## 3.5 Image store under /opt (server, as root)
 
