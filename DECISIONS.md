@@ -344,3 +344,12 @@ give it back in the reply, not to censor the model's output, so the scope is `in
 Consequence to state to users: PII that the model itself produces (e.g. a public
 figure's name) is not masked on the way back. The order-dependent behaviour of
 `both` + `output_parse_pii` is worth an upstream report; not a blocker here.
+
+## D-28 Scheduled backups wait for a supervisor decision
+A manual dump with a restore test into a scratch database (docs/06 §6.1) is run once,
+so the procedure is proven before the first image update (§6.3 depends on it). A daily
+timer, the retention and any off-host copy are not set up: the questions that decide
+them (where a copy may live outside the server, who holds the encryption key) are policy
+and are raised with the supervisor once the gateway is in service. Until then the
+database holds no issued keys, so the exposure is limited to the validation state.
+Capacity is not the constraint: a dump is a few hundred KB.

@@ -18,13 +18,20 @@ llmgw$ mkdir -p -m 700 /opt/llm-gateway/postgres/backups
 llmgw$ podman exec postgres pg_dump -U litellm -d litellm -Fc > /opt/llm-gateway/postgres/backups/litellm-$(date +%F).dump
 ```
 
-Schedule it with the service account's crontab (`llmgw$ crontab -e`) or a user timer.
-Encrypt at rest (`age` or `gpg`) before moving off-host; the dump contains hashed keys and
-spend metadata. Test a restore quarterly:
+Scheduling (user timer under `llmgw`), retention and any off-host copy are deferred to a
+supervisor decision (D-28). When they come: encrypt at rest (`age` or `gpg`) before moving
+off-host; the dump contains hashed keys and spend metadata. Test a restore quarterly,
+into a scratch database rather than over the live one:
 
 ```bash
-llmgw$ podman exec -i postgres pg_restore -U litellm -d litellm --clean --if-exists < /opt/llm-gateway/postgres/backups/litellm-<date>.dump
+llmgw$ podman exec postgres createdb -U litellm litellm_restoretest
+llmgw$ podman exec -i postgres pg_restore -U litellm -d litellm_restoretest < /opt/llm-gateway/postgres/backups/litellm-<date>.dump
+llmgw$ podman exec postgres psql -U litellm -d litellm_restoretest -tAc 'select count(*) from _prisma_migrations'   # same as live
+llmgw$ podman exec postgres dropdb -U litellm litellm_restoretest
 ```
+
+A real restore over the live database (after a failed migration, §6.3) is the same
+`pg_restore` with `-d litellm --clean --if-exists`, with `llmgw-litellm.service` stopped.
 
 ## 6.2 Routine checks
 
