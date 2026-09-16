@@ -194,6 +194,12 @@ allowtcpforwarding`). Login with `UI_USERNAME` / `UI_PASSWORD`. Confirm:
   memory at the next restart, but it would sit in the database. Provider keys stay in
   `litellm.env` only (D-19, §6.5).
 
+Result (2026-09-16): tunnel and login work; Models + Endpoints shows `mock-echo` with
+"Defined in config" and credentials "Manual", nothing editable. The validation key had
+already been deleted (5.9) when the UI was opened, so its Virtual Keys entry was not
+viewed; the API check in 5.6 covers it. The "Add Model" refusal was not exercised in the
+UI; the guard is verified in the source. Pass.
+
 ## 5.9 Clean up and record
 
 - Remove the `mock-echo` entry from `deploy/opt/litellm/config.yaml` in the repository,
@@ -205,6 +211,10 @@ allowtcpforwarding`). Login with `UI_USERNAME` / `UI_PASSWORD`. Confirm:
   `{"key_aliases":["validation-dev1"]}`.
 - Record the results (pass/fail per section, versions, date) in the phase 5 entry of
   `README.md` and any deviations in `DECISIONS.md`.
+
+Result (2026-09-16): `POST /key/delete` by alias returned `{"deleted_keys":["validation-dev1"]}`
+and `/key/info` on the alias answers 404 "Key not found in database". `mock-echo` stays
+until phase 7. Phase 5 is closed except 5.7 and 5.10, which wait for the provider (D-19).
 
 ## 5.10 Exit criteria and opening the port
 
