@@ -353,3 +353,16 @@ them (where a copy may live outside the server, who holds the encryption key) ar
 and are raised with the supervisor once the gateway is in service. Until then the
 database holds no issued keys, so the exposure is limited to the validation state.
 Capacity is not the constraint: a dump is a few hundred KB.
+
+## D-29 First provider: Google Gemini through the AI Studio API
+Chosen 2026-09-16 for the supervisor demonstration and first use, over a local model
+server (Ollama or llama.cpp on this VM's CPU): no new container, no memory taken from the
+Presidio budget, real answers. Public name `gemini-2.5-flash`, key variable
+`GEMINI_API_KEY` in `litellm.env` only. Consequences, to be stated to the supervisor:
+requests leave the bank after masking; on the free tier Google may use them to improve
+its products, the paid tier has other terms; the guardrail masks only text parts, an
+attached file or image goes to Google unmasked (docs/05 §5.7). `mock-echo` is kept as a
+test-only entry (docs/05 §5.9, docs/06 §6.3); user keys never list it. Egress today is
+TCP 443 to any address (the nft policy is deferred, D-22); when applied it can be
+narrowed to `generativelanguage.googleapis.com`. Amends D-19: the provider decision is
+made; the phase 7 procedure applies unchanged.

@@ -145,22 +145,41 @@ deleted by alias in 5.9.
 ## 5.7 Real provider round trip (phase 7, after the provider is chosen)
 
 The provider and its key are decided only once 5.1 to 5.6 pass and the stack is judged
-sound (D-19). Until then `model_list` holds only `mock-echo` and no provider key exists
-on the server. Phase 7 then consists of:
+sound (D-19). Decided 2026-09-16: Google Gemini through the AI Studio API, public model
+name `gemini-2.5-flash` (D-29). Phase 7 consists of:
 
-1. Add the model entries to `deploy/opt/litellm/config.yaml` (the commented examples show
-   the shape: `model_name` as clients will call it, `litellm_params.model` in LiteLLM's
-   `<provider>/<model>` form, `api_key: os.environ/<VAR>`), commit, `scp` and install
-   the file as `llmgw` (docs/06 §6.5).
-2. Put the key in `/opt/llm-gateway/litellm/litellm.env` (mode 0600, `llmgw`), restart
-   `llmgw-litellm.service`, confirm `/v1/models` lists the new names.
+1. The model entry is in `deploy/opt/litellm/config.yaml` (`model_name` as clients call
+   it, `litellm_params.model` in LiteLLM's `<provider>/<model>` form,
+   `api_key: os.environ/GEMINI_API_KEY`). Transfer the file with the branch ZIP and
+   `scp` (docs/03 §3.4), check it and install it as `llmgw`:
+
+   ```bash
+   grep -c $'\r' /tmp/config.yaml; diff /opt/llm-gateway/litellm/config.yaml /tmp/config.yaml
+   sudo install -m 644 -o llmgw -g llmgw /tmp/config.yaml /opt/llm-gateway/litellm/config.yaml && rm /tmp/config.yaml
+   ```
+
+   The CRLF count must be 0 and the diff must show only the intended lines.
+2. Create the key at aistudio.google.com and put it in
+   `/opt/llm-gateway/litellm/litellm.env` without it ever appearing on screen or in the
+   shell history, then restart LiteLLM and confirm `/v1/models` lists the new name:
+
+   ```bash
+   llmgw$ read -rs -p 'Gemini key: ' GK; echo; printf 'GEMINI_API_KEY=%s\n' "$GK" >> /opt/llm-gateway/litellm/litellm.env; unset GK
+   llmgw$ grep -c '^GEMINI_API_KEY=' /opt/llm-gateway/litellm/litellm.env; stat -c '%U %a' /opt/llm-gateway/litellm/litellm.env
+   llmgw$ systemctl --user restart llmgw-litellm.service && podman ps --format '{{.Names}}\t{{.Status}}'
+   curl -sS $BASE/v1/models -H "Authorization: Bearer $MASTER_KEY" | python3 -c 'import sys,json; print([m["id"] for m in json.load(sys.stdin)["data"]])'
+   ```
 3. Issue a virtual key limited to the new model (like 5.6) and send, through it, a prompt
    containing a name:
 
    ```bash
+   VKEY=$(curl -sS -X POST $BASE/key/generate -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" \
+     -d '{"key_alias":"validation-gemini","models":["gemini-2.5-flash"],"max_budget":1,"budget_duration":"30d","duration":"7d"}' \
+     | python3 -c 'import sys,json; print(json.load(sys.stdin)["key"])')
    curl -sS $BASE/v1/chat/completions \
-     -H "Authorization: Bearer <virtual-key>" -H "Content-Type: application/json" \
-     -d '{"model":"<public-model-name>","messages":[{"role":"user","content":"Reply with exactly the text between the quotes: \"Hello Dennis Yurichev\""}]}'
+     -H "Authorization: Bearer $VKEY" -H "Content-Type: application/json" \
+     -d '{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"Reply with exactly the text between the quotes: \"Hello Dennis Yurichev\""}]}' \
+     | python3 -c 'import sys,json; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
    ```
 
    The reply must contain `Hello Dennis Yurichev` (restored), while the provider only
@@ -174,7 +193,14 @@ on the server. Phase 7 then consists of:
 
    Confirm the `messages` and `response` columns of the same rows are empty objects
    (`store_prompts_in_spend_logs: false`).
-4. Optionally narrow the egress rule to the provider's addresses (docs/02 §2.8).
+4. Optionally narrow the egress rule to the provider's addresses (docs/02 §2.8); the
+   endpoint is `generativelanguage.googleapis.com`, TCP 443.
+
+Limits to state to users (D-29): the guardrail scans only the text parts of a message
+(verified in 1.100.1 `presidio.py`: list content items without a `text` field are
+skipped), so a file or image attachment reaches the provider unmasked; documents are
+pasted as text. On the AI Studio free tier Google may use requests to improve its
+products.
 
 ## 5.8 Admin UI
 
@@ -202,19 +228,16 @@ UI; the guard is verified in the source. Pass.
 
 ## 5.9 Clean up and record
 
-- Remove the `mock-echo` entry from `deploy/opt/litellm/config.yaml` in the repository,
-  commit, `scp` the file to the server and install it as `llmgw`
-  (`sudo install -m 644 -o llmgw -g llmgw /tmp/config.yaml /opt/llm-gateway/litellm/config.yaml`),
-  then `systemctl --user restart llmgw-litellm.service` (the file is bind-mounted, so a
-  restart applies it).
+- `mock-echo` stays in `config.yaml` as a test-only entry (D-29): it is what §5.4 and
+  the regression checks of docs/06 §6.3 use. Virtual keys for users list the real model
+  names only, so users cannot reach it.
 - Delete the validation key by alias, the value was never kept: `POST /key/delete` with
   `{"key_aliases":["validation-dev1"]}`.
 - Record the results (pass/fail per section, versions, date) in the phase 5 entry of
   `README.md` and any deviations in `DECISIONS.md`.
 
 Result (2026-09-16): `POST /key/delete` by alias returned `{"deleted_keys":["validation-dev1"]}`
-and `/key/info` on the alias answers 404 "Key not found in database". `mock-echo` stays
-until phase 7. Phase 5 is closed except 5.7 and 5.10, which wait for the provider (D-19).
+and `/key/info` on the alias answers 404 "Key not found in database". Phase 5 is closed except 5.7 and 5.10, which wait for the provider (D-19).
 
 ## 5.10 Exit criteria and opening the port
 
