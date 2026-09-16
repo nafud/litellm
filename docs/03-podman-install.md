@@ -144,28 +144,36 @@ sudo chmod 700 /opt/llm-gateway/postgres /opt/llm-gateway/postgres/data /opt/llm
 
 ## 3.4 Copy the deployment tree (workstation, then server)
 
-From the repository checkout on the workstation:
+No git client is installed on the workstation (D-24). The branch is downloaded from GitHub
+as a ZIP (Code → Download ZIP on the branch, or
+`https://github.com/nafud/litellm/archive/refs/heads/claude/zealous-lamport-kklwuf.zip`),
+extracted, and the two directories are sent with the OpenSSH `scp` that ships with Windows.
+The archive is produced by `git archive`, which applies `.gitattributes`, so the files
+arrive with LF endings; the check on the server confirms it. From PowerShell in the
+extracted folder (`litellm-claude-zealous-lamport-kklwuf`):
 
-```bash
+```powershell
 scp -r deploy/opt deploy/llmgw infosec@10.50.4.68:/tmp/
 ```
 
-On the server, put the files in place with `llmgw` ownership. `cp -a` preserves the
-executable bit of the scripts; the env templates are copied as templates only (the real
-files are created in docs/04 §4.1):
+On the server, put the files in place with `llmgw` ownership. Windows keeps no Unix
+mode bits, so the scripts under `bin` get their executable bit back explicitly; the env
+templates are copied as templates only (the real files are created in docs/04 §4.1):
 
 ```bash
-grep -rl $'\r' /tmp/opt /tmp/llmgw; echo "crlf-check rc=$?"   # must print nothing, rc=1: a checkout made before .gitattributes may carry CRLF
+grep -rl $'\r' /tmp/opt /tmp/llmgw; echo "crlf-check rc=$?"   # must print nothing, rc=1
 sudo cp -a /tmp/opt/. /opt/llm-gateway/
 sudo chown -R llmgw:llmgw /opt/llm-gateway/{litellm,presidio,postgres,network,bin}
+sudo chmod 750 /opt/llm-gateway/bin/*.sh
 sudo install -d -m 700 -o llmgw -g llmgw /home/llmgw/.config/containers
 sudo install -m 600 -o llmgw -g llmgw /tmp/llmgw/storage.conf /home/llmgw/.config/containers/storage.conf
 rm -rf /tmp/opt /tmp/llmgw
-find /opt/llm-gateway -maxdepth 2 -printf '%M %u:%g %p\n'
+sudo find /opt/llm-gateway -maxdepth 2 -printf '%M %u:%g %p\n'
+sudo ls -l /home/llmgw/.config/containers/
 ```
 
-Repeating this after any change in the repository is the update path (docs/06): copy,
-`cp -a`, restart the affected unit.
+Repeating this after any change in the repository is the update path (docs/06): download
+the ZIP again, `scp`, CRLF check, `cp -a`, chmod, restart the affected unit.
 
 ## 3.5 Image store under /opt (server, as root)
 

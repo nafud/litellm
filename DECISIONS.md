@@ -293,3 +293,12 @@ under the gateway can fill `/`) is weak here because every component has a bound
 size: pinned images only (no auto-pull), a small PostgreSQL, a 2 GB journal cap, and
 systemd resource ceilings (D-15). Kept on root. Revisit if the host ever hosts more than
 this stack or if the image store grows past tens of gigabytes.
+
+## D-24 No git client on the workstation; ZIP transfer
+The owner keeps the work computer free of extra software. The repository is downloaded
+from GitHub as a branch ZIP and the `deploy/` directories are sent with the OpenSSH
+`scp` that ships with Windows (docs/03 §3.4). Consequences: no `git pull` update path,
+so every update is a fresh ZIP download; Unix mode bits do not survive Windows, so the
+server side restores the executable bit on the scripts under `bin`; line endings are
+still LF because `git archive` honours `.gitattributes`, and the CRLF check on the
+server remains the gate before anything is copied into place.
