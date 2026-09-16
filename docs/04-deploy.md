@@ -11,33 +11,31 @@ llmgw$ install -m 600 /opt/llm-gateway/postgres/postgres.env.example /opt/llm-ga
 llmgw$ install -m 600 /opt/llm-gateway/litellm/litellm.env.example  /opt/llm-gateway/litellm/litellm.env
 ```
 
-Generate values (hex only: they are embedded in a URL and passed without quoting):
+Generate the values and write them into the two files without printing them (hex only:
+they are embedded in a URL, passed without quoting, and safe for `sed`). The variables
+are unset afterwards; the shell history holds only the commands, never the values:
 
 ```bash
-llmgw$ PGPW=$(openssl rand -hex 32)
-llmgw$ echo "POSTGRES_PASSWORD=$PGPW"
-llmgw$ echo "DATABASE_URL=postgresql://litellm:$PGPW@postgres:5432/litellm"
-llmgw$ echo "LITELLM_MASTER_KEY=sk-$(openssl rand -hex 32)"
-llmgw$ echo "LITELLM_SALT_KEY=sk-$(openssl rand -hex 32)"
-llmgw$ echo "UI_PASSWORD=$(openssl rand -hex 24)"
+llmgw$ PGPW=$(openssl rand -hex 32); MK="sk-$(openssl rand -hex 32)"; SK="sk-$(openssl rand -hex 32)"; UIPW=$(openssl rand -hex 24)
+llmgw$ sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$PGPW|" /opt/llm-gateway/postgres/postgres.env
+llmgw$ sed -i -e "s|^LITELLM_MASTER_KEY=.*|LITELLM_MASTER_KEY=$MK|" -e "s|^LITELLM_SALT_KEY=.*|LITELLM_SALT_KEY=$SK|" -e "s|^DATABASE_URL=.*|DATABASE_URL=postgresql://litellm:$PGPW@postgres:5432/litellm|" -e "s|^UI_PASSWORD=.*|UI_PASSWORD=$UIPW|" /opt/llm-gateway/litellm/litellm.env
+llmgw$ unset PGPW MK SK UIPW
+llmgw$ grep -c REPLACE /opt/llm-gateway/*/*.env                                # both must print 0
+llmgw$ ls -l /opt/llm-gateway/*/*.env                                           # -rw------- llmgw llmgw
+llmgw$ grep -hE '^[A-Z_]+=' /opt/llm-gateway/*/*.env | sed -E 's/=.*/=<set>/'   # the six variables, values hidden
 ```
-
-Edit both files (`vi`) and fill in:
 
 | File | Variable | Value |
 |------|----------|-------|
 | `postgres/postgres.env` | `POSTGRES_PASSWORD` | generated |
-| `litellm/litellm.env` | `DATABASE_URL` | the line printed above (same password) |
+| `litellm/litellm.env` | `DATABASE_URL` | carries the same password |
 | `litellm/litellm.env` | `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`, `UI_PASSWORD` | generated |
 | `litellm/litellm.env` | provider keys | **none yet**: the provider is chosen after validation (D-19, docs/05 §5.7) |
 
-```bash
-llmgw$ grep -c REPLACE /opt/llm-gateway/*/*.env      # both must print 0
-llmgw$ ls -l /opt/llm-gateway/*/*.env                 # -rw------- llmgw llmgw
-```
-
-Store `LITELLM_SALT_KEY` in the company password manager now: it cannot be rotated
-without losing encrypted DB content, and a restored database is useless without it.
+Store `LITELLM_SALT_KEY` in the company password manager now (`cat` the file to read
+it; do not paste it anywhere else): it cannot be rotated without losing encrypted DB
+content, and a restored database is useless without it. Store `LITELLM_MASTER_KEY` and
+`UI_PASSWORD` with it.
 The database and role names (`litellm`/`litellm`) are fixed in
 `postgres/llmgw-postgres.container`; only the password is in the env file.
 
