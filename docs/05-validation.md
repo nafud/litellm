@@ -53,7 +53,7 @@ exactly that.
 
 ## 5.4 End-to-end mask + restore, without a provider
 
-`mock-echo` returns a fixed reply containing `<PERSON_1>` and `<EMAIL_ADDRESS_1>`. If the
+`mock-echo` returns a fixed reply containing `<PERSON_1>` and `<EMAIL_ADDRESS_2>`. If the
 `post_call` restoration works, those tokens come back replaced with the values from the
 request:
 
@@ -91,6 +91,15 @@ curl -sS -N $BASE/v1/chat/completions \
 
 The concatenated content must again read `... Dennis Yurichev dennis@example.com`.
 
+Result (2026-09-16, after the scope fix, `LITELLM_LOG=INFO`): non-streaming and streaming
+both return `Mock reply. Restored placeholders: Dennis Yurichev dennis@example.com`. Pass.
+A request without PII returns the raw placeholders, as there is nothing to restore. The
+guardrail instance count is only visible at DEBUG (the `Checking if <... object at 0x...>`
+lines), so it was not re-counted at INFO; the source of 1.100.1
+(`initialize_presidio`, `run_output = filter_scope in ("output", "both")`) shows that
+`input` creates exactly the pre_call masker and the post_call restorer, and the restored
+streaming reply is the functional proof that the output masker is gone.
+
 ## 5.5 Fail-closed check
 
 Stop the analyzer and repeat 5.4: the request must be rejected (HTTP 4xx/5xx with a
@@ -106,19 +115,32 @@ curl -sS -o /dev/null -w 'HTTP %{http_code}\n' $BASE/v1/chat/completions \
 llmgw$ systemctl --user start llmgw-presidio-analyzer.service
 ```
 
+Result (2026-09-16): LiteLLM stays `active`; the request is answered with HTTP 500 and the
+body `{"error":{"message":"Presidio PII analysis failed: ClientConnectorDNSError", ...}}`.
+The name `presidio-analyzer` stops resolving on the internal network as soon as the
+container is gone, the guardrail raises, nothing is forwarded to the model. After the
+restart all four containers report healthy within 30 s. Pass.
+
 ## 5.6 Virtual keys and budgets
 
 ```bash
 curl -sS -X POST $BASE/key/generate \
   -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"key_alias":"validation-dev1","models":["claude-sonnet-5","mock-echo"],"max_budget":5,"budget_duration":"30d","duration":"30d"}'
+  -d '{"key_alias":"validation-dev1","models":["mock-echo"],"max_budget":5,"budget_duration":"30d","duration":"30d"}'
 ```
 
-Save the returned `key` (`sk-...`). Then, with that key:
+Keep the returned `key` (`sk-...`) in a shell variable, never print it. Then, with that key:
 
 - a request to `mock-echo` succeeds;
-- a request to `claude-opus-5` is refused (not in the key's model list);
+- a request to `other-model` is refused with HTTP 403, `key_model_access_denied`;
 - `GET /key/info?key=<key>` with the master key shows the alias, budget and spend.
+
+Result (2026-09-16): key generated (25 characters, `sk-` plus 22); `mock-echo` answers
+through it; `other-model` is refused with 403 "key not allowed to access model. This key
+can only access models=['mock-echo']"; `/key/info` shows alias `validation-dev1`, models
+`['mock-echo']`, `max_budget 5.0`, `spend 0.0` (the mock model has no price), budget
+duration `30d`, expiry 30 days out. Pass. The variable was unset afterwards; the key is
+deleted by alias in 5.9.
 
 ## 5.7 Real provider round trip (phase 7, after the provider is chosen)
 
@@ -168,7 +190,8 @@ provider credentials.
   (`sudo install -m 644 -o llmgw -g llmgw /tmp/config.yaml /opt/llm-gateway/litellm/config.yaml`),
   then `systemctl --user restart llmgw-litellm.service` (the file is bind-mounted, so a
   restart applies it).
-- Delete the validation key: `POST /key/delete` with `{"keys":["<key>"]}`.
+- Delete the validation key by alias, the value was never kept: `POST /key/delete` with
+  `{"key_aliases":["validation-dev1"]}`.
 - Record the results (pass/fail per section, versions, date) in the phase 5 entry of
   `README.md` and any deviations in `DECISIONS.md`.
 

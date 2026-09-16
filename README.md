@@ -65,10 +65,10 @@ older tutorials still reference the Microsoft registry.
 |---|-------|----------|--------|
 | 0 | Repository and reference material | this file, `DECISIONS.md` | done |
 | 1 | Server assessment (read-only) | `docs/01-server-assessment.md`, `scripts/assess.sh` | done 2026-09-14; open questions in §1.3 |
-| 2 | Host hardening (RHEL 10): SELinux, SSH, firewalld, egress | `docs/02-hardening.md`, `deploy/host/` | **next**, after the §1.3 answers |
-| 3 | Package source, Podman, service account, /opt tree, images | `docs/03-podman-install.md`, `scripts/verify-pins.sh`, `deploy/opt/bin/` | pending |
-| 4 | Deploy the stack (Quadlet) | `docs/04-deploy.md`, `deploy/opt/` | pending |
-| 5 | Validation: health, keys, masking end to end (mock model) | `docs/05-validation.md` | pending |
+| 2 | Host hardening (RHEL 10): SELinux, SSH, firewalld, egress | `docs/02-hardening.md`, `deploy/host/` | SELinux enforcing 2026-09-16 (§4.5); SSH, sysctl, firewalld, egress deferred (D-22) |
+| 3 | Package source, Podman, service account, /opt tree, images | `docs/03-podman-install.md`, `scripts/verify-pins.sh`, `deploy/opt/bin/` | done 2026-09-16 |
+| 4 | Deploy the stack (Quadlet) | `docs/04-deploy.md`, `deploy/opt/` | done 2026-09-16; audit rules and reboot test wait for the patch window (§4.5) |
+| 5 | Validation: health, keys, masking end to end (mock model) | `docs/05-validation.md` | **in progress**: 5.1 to 5.6 pass 2026-09-16; 5.8 next |
 | 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | pending |
 | 7 | Provider choice, key, real round trip | `docs/05-validation.md` §5.7 | after phase 5 (D-19) |
 | later | TLS termination, SSO for the admin UI, client onboarding | to be decided after phase 5 | open |
