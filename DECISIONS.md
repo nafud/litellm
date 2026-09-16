@@ -327,3 +327,10 @@ is installed and is to be removed when the policy update arrives. (3) The CIS ki
 `/etc/logrotate.d/audit` duplicated auditd's own rotation and was denied by policy;
 removed, auditd rotates. A blanket audit2allow module was rejected: it would have
 encoded the imfile and logrotate defects into policy.
+
+Amendment (same day): only the parts that unblock enforcing were applied (module,
+logrotate removal, imfile removal; plugin package installed but inactive). Plugin
+activation, `local6.none` and the auditd rate-limit drop-in are deferred to the SIEM
+work, since the collector is unreachable and the audit trail never reached it. The
+gateway audit rules and the reboot test move to the first patch window. Enforcing was
+switched at runtime with the stack running; no denial followed.

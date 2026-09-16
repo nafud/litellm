@@ -219,23 +219,30 @@ sudo systemctl daemon-reload && systemctl show auditd.service -p LogRateLimitInt
 Plugin, `num_logs` and the audit rules all load at the reboot (auditd cannot be
 restarted under `enabled 2`, and the plugin starts with auditd).
 
-### Reboot, verify, enforce
+### What was applied (2026-09-16) and what waits for the patch window
+
+Applied: the rhsmcertd module, the logrotate removal, `audispd-plugins` installed
+(inactive), and the imfile input removed. Not applied, by decision (D-26 amended): the
+plugin activation, the `local6.none` selector and the auditd rate-limit drop-in, all of
+which only matter once the SIEM path exists; they are the SIEM-team item, with the
+procedure above as the implementation. No `num_logs` change (auditd default kept).
+
+Enforcing was switched at runtime without a reboot, since nothing else needed one:
 
 ```bash
+sudo setenforce 1 && getenforce                                                    # Enforcing
 sudo sed -i 's/^SELINUX=permissive$/SELINUX=enforcing/' /etc/selinux/config && grep '^SELINUX=' /etc/selinux/config
-sudo reboot
-# after login:
-getenforce                                                                                     # Enforcing
-systemctl is-failed audit-rules.service; sudo auditctl -s | grep -E '^enabled'                 # inactive, enabled 2
-sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'                         # 10
-pgrep -a audisp-syslog; sudo journalctl -t audisp-syslog -n 2 --no-pager                       # plugin running, records flowing
-sudo grep -c audisp-syslog /var/log/messages                                                   # 0
-sudo ausearch -m AVC -ts boot                                                                  # <no matches>
-sudo machinectl shell llmgw@
-llmgw$ systemctl --user list-units 'llmgw-*' && podman ps --format '{{.Names}}\t{{.Status}}'   # six active, four healthy, nobody started them
+llmgw$ podman ps --format '{{.Names}}\t{{.Status}}'                                 # four healthy
+llmgw$ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4000/health/liveliness   # 200
+sudo ausearch -m AVC -ts recent                                                    # only permissive=1 entries from the rsyslog restart, none after
 ```
 
-Then one request from docs/05 §5.1 under enforcing.
+Result: Enforcing, four containers healthy, 200, no denial under enforcing.
+
+Deferred to the first patch window (docs/06 §6.8), which reboots anyway: install
+`llm-gateway.rules` into `rules.d` (block at the top of this section), then after the
+reboot verify `enabled 2`, the rule count of 10, `getenforce` Enforcing, and that all
+four containers come back healthy without anyone starting them.
 
 ## 4.6 Exit criteria
 
@@ -243,5 +250,6 @@ Then one request from docs/05 §5.1 under enforcing.
 - Only `127.0.0.1:4000` is listening on the host, owned by `llmgw`.
 - Limits reported by `systemctl --user show` match the units.
 - `llmgw-backend` is internal and the egress test from Presidio fails.
-- The stack survives a reboot; SELinux is enforcing with no denials.
+- SELinux is enforcing with no denials (done 2026-09-16); the reboot test and the
+  gateway audit rules are scheduled for the first patch window.
 - Proceed to `docs/05-validation.md`.
