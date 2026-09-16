@@ -164,31 +164,78 @@ listens, owned by rootlessport. No container-related AVC. One new host AVC:
 Red Hat's subscription daemon, a policy gap unrelated to the gateway; handled in §4.5
 together with the rsyslog one.
 
-## 4.5 Gateway audit rules, reboot test, then enforcing
+## 4.5 Gateway audit rules, SELinux findings, one reboot, then enforcing
 
 The audit configuration has been immutable since the docs/02 §2.1 reboot (`enabled 2`),
-so the gateway watches are added to `rules.d` now that every target exists, and this
-reboot loads them. Copy `deploy/host/llm-gateway.rules` with the tree (docs/03 §3.5) or
-paste it with a heredoc:
+so the gateway watches are added to `rules.d` now that every target exists, and the
+reboot loads them. `deploy/host` reaches the server the same way as §3.4 (ZIP, `scp`):
 
 ```bash
+grep -rl $'\r' /tmp/host; echo "crlf-check rc=$?"                          # nothing, rc=1
 sudo install -m 640 -o root -g root /tmp/host/llm-gateway.rules /etc/audit/rules.d/llm-gateway.rules
+rm -rf /tmp/host
 for d in /etc/containers /opt/llm-gateway /home/llmgw/.config/containers /etc/nftables /etc/firewalld; do sudo test -d "$d" && echo "ok $d" || echo "MISSING $d"; done
 sudo augenrules --check          # "Rules have changed and should be updated"; it cannot load them now
-sudo reboot
-# after login:
-systemctl is-active audit-rules.service; sudo auditctl -s | grep -E '^enabled'                 # active, enabled 2
-sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'                         # 10
-# after login:
-sudo machinectl shell llmgw@
-llmgw$ systemctl --user list-units 'llmgw-*' && podman ps --format '{{.Names}}\t{{.Status}}'
 ```
 
-All four containers must come back healthy without anyone starting them. With no AVC
-denials recorded through §4.3 and §4.4 other than the known rsyslog one (docs/02 §2.1
-result: `syslogd_t` reading `auditd_log_t`), resolve that one first (auditd `syslog`
-plugin or local policy module, agreed with the SIEM team), then switch SELinux to
-enforcing (docs/02 §2.1) and repeat `podman ps` and one request from docs/05 §5.1.
+### Denial census before enforcing
+
+Every domain denied anything since the relabel reboot, with the stack running:
+
+```bash
+sudo ausearch -m AVC -ts this-week | grep -oE 'scontext=[^ ]+ tcontext=[^ ]+ tclass=[a-z_]+' | sort | uniq -c | sort -rn
+```
+
+Result (2026-09-16): no container-related denial at all; three host pairs, each traced
+to its cause in the policy sources (fedora-selinux/selinux-policy, branch c10s) rather
+than allowed blindly:
+
+| Denied | Cause | Fix |
+|---|---|---|
+| `rhsmcertd_t` read `insights_client_etc_rw_t` (`/etc/insights-client/machine-id`) | Upstream grants it with `insights_client_read_config(rhsmcertd_t)`; the line is active in rawhide and commented out in the RHEL 10 branch (selinux-policy-42.1.18-4.el10_2.3) | Local module `deploy/host/llmgw-rhsmcertd-insights.te`, the interface expanded verbatim; remove when a policy update carries it |
+| `syslogd_t` read `auditd_log_t` (rsyslog imfile on audit.log) | By design: only auditd manages audit logs, no boolean; audit events reach syslog through auditd's syslog plugin | Plugin instead of imfile (docs/02 §2.5, superseded block) |
+| `logrotate_t` unlink `auditd_log_t` | `/etc/logrotate.d/audit` (CIS kit) rotated the audit log in parallel with auditd; logrotate may only read audit logs | File removed; auditd rotates (`num_logs` raised, see below) |
+
+```bash
+# rhsmcertd: build and install the module (source in deploy/host, pasted to /root)
+sudo sh -c 'cd /root && checkmodule -M -m -o llmgw-rhsmcertd-insights.mod llmgw-rhsmcertd-insights.te && semodule_package -o llmgw-rhsmcertd-insights.pp -m llmgw-rhsmcertd-insights.mod && semodule -i llmgw-rhsmcertd-insights.pp'
+sudo semodule -l | grep llmgw                                                  # llmgw-rhsmcertd-insights
+# logrotate
+sudo cp -a /etc/logrotate.d/audit /root/logrotate-audit.cis-2026-01 && sudo rm /etc/logrotate.d/audit
+sudo logrotate -d /etc/logrotate.conf 2>&1 | grep -c audit                     # 0
+# rsyslog: audit stream by plugin, never into /var/log/messages
+sudo dnf -y install audispd-plugins
+sudo cp -a /etc/rsyslog.conf /root/rsyslog.conf.2026-09-16
+sudo sed -i '50s/^\*\.info;mail\.none;authpriv\.none;cron\.none\b/&;local6.none/' /etc/rsyslog.conf
+sudo sed -i -e 's/^active = no$/active = yes/' -e 's/^args = LOG_INFO$/args = LOG_INFO LOG_LOCAL6/' /etc/audit/plugins.d/syslog.conf
+sudo mv /etc/rsyslog.d/10-audit-imfile.conf /root/10-audit-imfile.conf.2026-09-16
+sudo find /var/lib/rsyslog -name 'imfile-state*' -print -delete
+sudo rsyslogd -N1 2>&1 | tail -3 && sudo systemctl restart rsyslog && systemctl is-active rsyslog
+sudo install -d -m 755 /etc/systemd/system/auditd.service.d
+sudo install -m 644 /tmp/host/auditd-log-ratelimit.conf /etc/systemd/system/auditd.service.d/10-log-ratelimit.conf   # or paste it
+sudo systemctl daemon-reload && systemctl show auditd.service -p LogRateLimitIntervalUSec   # 0
+```
+
+Plugin, `num_logs` and the audit rules all load at the reboot (auditd cannot be
+restarted under `enabled 2`, and the plugin starts with auditd).
+
+### Reboot, verify, enforce
+
+```bash
+sudo sed -i 's/^SELINUX=permissive$/SELINUX=enforcing/' /etc/selinux/config && grep '^SELINUX=' /etc/selinux/config
+sudo reboot
+# after login:
+getenforce                                                                                     # Enforcing
+systemctl is-failed audit-rules.service; sudo auditctl -s | grep -E '^enabled'                 # inactive, enabled 2
+sudo auditctl -l | grep -c -E 'sshd|subid|containers|firewall|gateway'                         # 10
+pgrep -a audisp-syslog; sudo journalctl -t audisp-syslog -n 2 --no-pager                       # plugin running, records flowing
+sudo grep -c audisp-syslog /var/log/messages                                                   # 0
+sudo ausearch -m AVC -ts boot                                                                  # <no matches>
+sudo machinectl shell llmgw@
+llmgw$ systemctl --user list-units 'llmgw-*' && podman ps --format '{{.Names}}\t{{.Status}}'   # six active, four healthy, nobody started them
+```
+
+Then one request from docs/05 §5.1 under enforcing.
 
 ## 4.6 Exit criteria
 

@@ -309,11 +309,27 @@ sudo journalctl -u rsyslog -b --no-pager | tail -n 5                # no errors
 ```
 
   The `.rpmnew` left by the upgrade only rewrites the local file actions in the new
-  syntax; nothing in it is needed. Two things for the SIEM team, not changed here: with a
-  plain `@@` action, messages are dropped while the collector is unreachable (a
-  disk-assisted queue on that action fixes it), and with SELinux enforcing rsyslog needs
-  read access to `auditd_log_t`; any denial shows in permissive mode (§2.1) and the
-  audisp `syslog` plugin is the alternative if the policy refuses it.
+  syntax; nothing in it is needed. For the SIEM team, not changed here: with a plain
+  `@@` action, messages are dropped while the collector is unreachable (a disk-assisted
+  queue on that action fixes it).
+
+  **Superseded (2026-09-16, docs/04 §4.5, D-26):** the imfile input above was replaced
+  by auditd's own syslog plugin. Two findings drove it. (1) SELinux: the policy grants
+  no domain but auditd access to `auditd_log_t` beyond reading for audit tooling, has no
+  boolean for rsyslog, and the denial `syslogd_t → auditd_log_t` appeared as soon as the
+  input worked; the policy's path for audit events into syslog is the plugin
+  (`audispd-plugins`), run by auditd in its own domain, which may send syslog messages.
+  (2) Routing: with facility `local6` at severity `info` the records also matched the
+  `*.info` selector of `/var/log/messages`; 173 590 audit lines had landed there in one
+  day. Now: `local6.none` on that selector, `active = yes` and `args = LOG_INFO LOG_LOCAL6`
+  in `/etc/audit/plugins.d/syslog.conf`, the drop-in removed, and a per-unit
+  `LogRateLimitIntervalSec=0` for `auditd.service` so journald never drops records on
+  the way to rsyslog (`deploy/host/auditd-log-ratelimit.conf`). Facility and severity
+  are unchanged for the SIEM; the syslog tag becomes `audisp-syslog` instead of
+  `tag_audit_log` (SIEM team informed). Also removed: `/etc/logrotate.d/audit` (CIS kit,
+  unowned), which rotated the audit log daily in parallel with auditd's own rotation and
+  was denied `unlink` on `auditd_log_t`; auditd rotates by `max_log_file` /
+  `num_logs` (backup `/root/logrotate-audit.cis-2026-01`).
 - **Journal:** volatile on this host (`/var/log/journal` absent, docs/01 §1.11), so every
   reboot discards it, including the boot that just happened. Container logs go to the
   journal (`LogDriver=journald`) and so do the `llmgw` user's units; make it persistent

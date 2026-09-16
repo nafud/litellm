@@ -312,3 +312,18 @@ with the journald log driver hits the same files. The alternative, adding `llmgw
 sudo, kernel); rejected. Logs are read by the admin with
 `sudo journalctl _SYSTEMD_USER_UNIT=<unit>`; the docs/04 and docs/06 commands were
 changed accordingly (2026-09-16).
+
+## D-26 Audit trail to the SIEM through auditd's syslog plugin; three SELinux findings
+Before enforcing, every denial since the relabel reboot was traced to its cause in the
+policy sources (docs/04 §4.5). Outcomes: (1) rsyslog no longer reads `audit.log`; the
+policy reserves audit logs for auditd, and auditd's syslog plugin (`audispd-plugins`) is
+the designed path into syslog. Same facility/severity for the SIEM (`local6.info`), tag
+`audisp-syslog` instead of `tag_audit_log`. `local6.none` keeps the records out of
+`/var/log/messages`, where the imfile input had written 173 590 lines in a day; a
+per-unit `LogRateLimitIntervalSec=0` on `auditd.service` stops journald from dropping
+bursts. (2) `rhsmcertd_t` reading the Insights machine-id is a known upstream gap (fixed
+in rawhide, not in RHEL 10.2); a local module carrying the upstream interface verbatim
+is installed and is to be removed when the policy update arrives. (3) The CIS kit's
+`/etc/logrotate.d/audit` duplicated auditd's own rotation and was denied by policy;
+removed, auditd rotates. A blanket audit2allow module was rejected: it would have
+encoded the imfile and logrotate defects into policy.
