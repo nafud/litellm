@@ -222,6 +222,10 @@ podman info --format 'rootless={{.Host.Security.Rootless}} selinux={{.Host.Secur
 Expected: `rootless=true selinux=true backend=netavark runtime=crun graphroot=/opt/llm-gateway/storage`.
 Commands written as `llmgw$` below run in this session.
 
+Result (2026-09-16): exactly that line. Podman's first run created the store under
+`/opt/llm-gateway/storage`; the `overlay*` directories were labelled
+`container_ro_file_t` through the §3.5 equivalence, the rest `data_home_t`.
+
 ## 3.7 Images: pull by pinned digest on the server
 
 Every unit pins `Image=repository:tag@sha256:<linux/amd64 manifest digest>` with
@@ -263,7 +267,8 @@ pull ("manifest unknown") and at lookup ("image not known").
 
 ## 3.8 Egress policy (server)
 
-Now that `llmgw` exists, apply docs/02 §2.8.
+Now that `llmgw` exists, docs/02 §2.8 could be applied here. Deferred to after phase 5
+with the other access restrictions (D-22).
 
 ## 3.9 Exit criteria
 
