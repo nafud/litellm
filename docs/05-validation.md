@@ -16,8 +16,9 @@ curl -sS $BASE/health/liveliness            # public route: "I'm alive!"
 curl -sS -H "Authorization: Bearer $MASTER_KEY" $BASE/health/readiness | python3 -m json.tool
 ```
 
-Readiness must report `"status": "connected"` for the database and list `presidio-pii`
-under the guardrails/callbacks it shows.
+Readiness must report `"db": "connected"`. Result (2026-09-16): `{"status": "healthy",
+"db": "connected"}`; this version lists no guardrails there, the guardrail is proven by
+§5.3 and §5.4 instead.
 
 ## 5.2 Presidio services directly (from the LiteLLM container, they are not published)
 
@@ -31,7 +32,9 @@ print(json.dumps(json.load(urllib.request.urlopen(req, timeout=30)), indent=1))
 PY
 ```
 
-Expect two results: `PERSON` (score around 0.85) and `EMAIL_ADDRESS` (score 1.0).
+Expect `PERSON` (score around 0.85) and `EMAIL_ADDRESS` (score 1.0). Result
+(2026-09-16): both, plus `URL` at 0.5 for `example.com` inside the address; `URL` is not
+in `pii_entities_config`, so LiteLLM ignores it.
 
 ## 5.3 Masking as the provider would see it
 
@@ -43,7 +46,10 @@ curl -sS -X POST $BASE/guardrails/apply_guardrail \
   -d '{"guardrail_name":"presidio-pii","text":"My name is Dennis Yurichev, mail dennis@example.com, card 4111 1111 1111 1111"}'
 ```
 
-Expected `response_text`: `My name is <PERSON>, mail <EMAIL_ADDRESS>, card <CREDIT_CARD>`.
+Expected `response_text`: `My name is <PERSON_1>, mail <EMAIL_ADDRESS_2>, card <CREDIT_CARD_3>`.
+Placeholders are numbered by position across all entities, not per entity type
+(litellm 1.100.1, `_finalize_presidio_anonymize_numbered_tokens`). Result (2026-09-16):
+exactly that.
 
 ## 5.4 End-to-end mask + restore, without a provider
 
@@ -59,6 +65,13 @@ curl -sS $BASE/v1/chat/completions \
 ```
 
 Expected: `Mock reply. Restored placeholders: Dennis Yurichev dennis@example.com`.
+
+Finding (2026-09-16, first run): the mock reply carried `<EMAIL_ADDRESS_1>` while the
+request produced `<EMAIL_ADDRESS_2>` (numbering above), so only the person was
+restored; config.yaml corrected, a placeholder without mapping is passed through
+unchanged. The streaming run returned `<PERSON> <EMAIL_ADDRESS_1>`: the restored name
+had been masked again with an un-numbered token, which in this version only the
+log-redaction pass produces; investigated in §5.4a.
 
 Streaming path (the restore logic is separate for streams):
 
