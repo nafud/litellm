@@ -265,6 +265,13 @@ anonymous pulls at a limited rate; one pull is far below it. Verified with Podma
 resolves under that exact reference with `--pull=never`; a wrong digest is refused at
 pull ("manifest unknown") and at lookup ("image not known").
 
+Result (2026-09-16): all four indexes read by digest, all four pulled, four `OK` lines
+and the RESULT line. Sizes reported by Podman: LiteLLM 2.01 GB, analyzer 958 MB,
+PostgreSQL 464 MB, anonymizer 237 MB; `du` reports 3.5 GB in the store. A `du` run as
+`llmgw` prints "Permission denied" for layer directories owned by container users,
+which map to the subordinate uid range and are unreadable to `llmgw` itself; that is
+expected. Measure the store with `podman system df` as `llmgw` or `sudo du` as the admin.
+
 ## 3.8 Egress policy (server)
 
 Now that `llmgw` exists, docs/02 §2.8 could be applied here. Deferred to after phase 5
@@ -276,4 +283,7 @@ with the other access restrictions (D-22).
 - `llmgw` has subordinate id ranges and lingering enabled.
 - `/opt/llm-gateway/*` exists with the ownership and modes of §3.3.
 - `pull-images.sh` ends with `RESULT: every unit's Image= resolves ...`.
-- `sudo nft list table inet llmgw_egress` is loaded; `sudo ausearch -m AVC -ts recent` shows no denials.
+- `sudo ausearch -m AVC -ts recent` shows no denials from the Podman run.
+- `sudo nft list table inet llmgw_egress` is loaded (deferred with §3.8, D-22).
+
+Phase 3 closed 2026-09-16 with the first four criteria met and the egress table deferred.
