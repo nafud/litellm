@@ -156,15 +156,19 @@ extracted folder (`litellm-claude-zealous-lamport-kklwuf`):
 scp -r deploy/opt deploy/llmgw infosec@10.50.4.68:/tmp/
 ```
 
-On the server, put the files in place with `llmgw` ownership. Windows keeps no Unix
-mode bits, so the scripts under `bin` get their executable bit back explicitly; the env
+On the server, put the files in place with `llmgw` ownership. The copy must not carry
+the modes of the `/tmp` tree (scp creates it as the admin user with mode 700, and
+`cp -a` would apply that to `/opt/llm-gateway` and its subdirectories); `--no-preserve=all`
+leaves the existing directories from §3.3 untouched. Windows keeps no Unix mode bits, so
+the scripts under `bin` get their executable bit back explicitly, by full path because
+the admin shell cannot expand a glob inside a directory it may not list. The env
 templates are copied as templates only (the real files are created in docs/04 §4.1):
 
 ```bash
 grep -rl $'\r' /tmp/opt /tmp/llmgw; echo "crlf-check rc=$?"   # must print nothing, rc=1
-sudo cp -a /tmp/opt/. /opt/llm-gateway/
+sudo cp -r --no-preserve=all /tmp/opt/. /opt/llm-gateway/
 sudo chown -R llmgw:llmgw /opt/llm-gateway/{litellm,presidio,postgres,network,bin}
-sudo chmod 750 /opt/llm-gateway/bin/*.sh
+sudo chmod 750 /opt/llm-gateway/bin/link-quadlets.sh /opt/llm-gateway/bin/pull-images.sh
 sudo install -d -m 700 -o llmgw -g llmgw /home/llmgw/.config/containers
 sudo install -m 600 -o llmgw -g llmgw /tmp/llmgw/storage.conf /home/llmgw/.config/containers/storage.conf
 rm -rf /tmp/opt /tmp/llmgw
@@ -173,7 +177,12 @@ sudo ls -l /home/llmgw/.config/containers/
 ```
 
 Repeating this after any change in the repository is the update path (docs/06): download
-the ZIP again, `scp`, CRLF check, `cp -a`, chmod, restart the affected unit.
+the ZIP again, `scp`, CRLF check, the same `cp`, chmod, restart the affected unit.
+
+Result (2026-09-16): the first run used `cp -a`, which set `/opt/llm-gateway` to
+`infosec:infosec 700` and the four 750 subdirectories to 700, and the glob chmod failed
+as described; files were all correct. Repaired with the §3.3 chown/chmod lines and the
+explicit chmod of the two scripts; procedure above corrected.
 
 ## 3.5 Image store under /opt (server, as root)
 
