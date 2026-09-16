@@ -98,6 +98,13 @@ No `systemctl enable` is needed: the units carry `WantedBy=default.target`, so t
 generator wires them into the user manager's boot; with lingering enabled they start at
 host boot. Confirm: `systemctl --user list-dependencies default.target | grep llmgw`.
 
+Result (2026-09-16): PostgreSQL initialised and healthy at first start; both Presidio
+services healthy after about 30 s; LiteLLM applied 161 Prisma migrations, passed its
+post-migration sanity check, loaded `mock-echo`, and the liveness probe answered 200
+within 25 s of "Application startup complete". Six units active, four containers
+healthy. Prisma logs a "distro wolfi" warning (engine fallback to the debian build);
+harmless.
+
 ## 4.4 Confirm the security posture and the resource limits
 
 ```bash
@@ -125,20 +132,25 @@ sudo ss -tlnp | grep ':4000 '                       # 127.0.0.1:4000 only, proce
 sudo ss -tlnp | grep -E ':(5432|3000) ' || echo "postgres/presidio not published: OK"
 ```
 
-Egress: from the internal network it must fail; from LiteLLM only TCP 443 is allowed by
-the host policy (docs/02 §2.8):
+Egress: from the internal network it must fail (property of the `Internal=true`
+network, independent of host policy); from LiteLLM the TCP 443 path must work:
 
 ```bash
 llmgw$ podman exec presidio-anonymizer curl -sS --max-time 5 https://ghcr.io/ || echo "no egress from backend network: OK"
-llmgw$ podman exec litellm python3 -c "import socket; socket.create_connection(('1.1.1.1', 80), timeout=5)"   # must time out
-sudo journalctl -k --since -5min | grep llmgw-egress-drop                                                       # one drop logged
 llmgw$ podman exec litellm python3 -c "import urllib.request, urllib.error
 try: print(urllib.request.urlopen('https://ghcr.io/v2/', timeout=10).status)
 except urllib.error.HTTPError as e: print(e.code)"                                                   # 401: TCP 443 open
 ```
 
 Any HTTP status from the last command proves the TCP 443 path from the container; the
-provider itself is tested in docs/05 §5.7 once chosen.
+provider itself is tested in docs/05 §5.7 once chosen. The two checks below need the
+host egress policy of docs/02 §2.8, deferred until after phase 5 (D-22); run them when
+it is applied:
+
+```bash
+llmgw$ podman exec litellm python3 -c "import socket; socket.create_connection(('1.1.1.1', 80), timeout=5)"   # must time out
+sudo journalctl -k --since -5min | grep llmgw-egress-drop                                                       # one drop logged
+```
 
 ## 4.5 Gateway audit rules, reboot test, then enforcing
 
