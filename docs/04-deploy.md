@@ -152,6 +152,18 @@ llmgw$ podman exec litellm python3 -c "import socket; socket.create_connection((
 sudo journalctl -k --since -5min | grep llmgw-egress-drop                                                       # one drop logged
 ```
 
+Result (2026-09-16): all as expected. LiteLLM user 65534, all capabilities dropped,
+`no-new-privileges`; PostgreSQL user 999 (inspect reports the keep-id mapping as
+`userns=private`; `podman exec postgres id` gives uid 999 and the data directory is
+owned by `llmgw` on the host); analyzer read-only root, user 1001; backend network
+internal; pasta/rootlessport/conmon all `llmgw`; limits 6G/2s, 5G/3s, 1G/1s, 1500M/1s
+with the cgroup files agreeing; anonymizer cannot resolve ghcr.io (no egress from the
+internal network); LiteLLM gets 401 from ghcr.io over 443; only `127.0.0.1:4000`
+listens, owned by rootlessport. No container-related AVC. One new host AVC:
+`rhsmcertd_t` reading `/etc/insights-client/machine-id` (`insights_client_etc_rw_t`),
+Red Hat's subscription daemon, a policy gap unrelated to the gateway; handled in §4.5
+together with the rsyslog one.
+
 ## 4.5 Gateway audit rules, reboot test, then enforcing
 
 The audit configuration has been immutable since the docs/02 §2.1 reboot (`enabled 2`),
