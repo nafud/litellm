@@ -46,6 +46,13 @@ guardrails:
       output_parse_pii: true
       # The stock analyzer image ships only the English spaCy model (en_core_web_lg).
       presidio_language: en
+      # Direction of the check. Default 'both' also registers a third guardrail instance
+      # (apply_to_output=True) that masks PII in the model's reply on its way to the
+      # user; combined with output_parse_pii it re-masks the values just restored (seen on
+      # the streaming path, docs/05 §5.4). 'input' = user -> model only: mask before the
+      # provider, restore in the reply. Verified in litellm 1.100.1
+      # guardrail_initializers.initialize_presidio.
+      presidio_filter_scope: input
       # Entity -> action. MASK replaces with <ENTITY_n>; BLOCK rejects the request.
       # With this map set, an analyzer failure rejects the request (fail closed)
       # instead of forwarding unmasked text.

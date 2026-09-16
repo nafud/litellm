@@ -334,3 +334,13 @@ activation, `local6.none` and the auditd rate-limit drop-in are deferred to the 
 work, since the collector is unreachable and the audit trail never reached it. The
 gateway audit rules and the reboot test move to the first patch window. Enforcing was
 switched at runtime with the stack running; no denial followed.
+
+## D-27 Presidio guardrail scope is input only
+LiteLLM's presidio initializer registers, for the default `presidio_filter_scope: both`,
+an additional guardrail instance that masks PII in model output towards the user. With
+`output_parse_pii: true` that instance undoes the restoration on the streaming path
+(docs/05 §5.4). The gateway's purpose is to keep users' PII away from the provider and
+give it back in the reply, not to censor the model's output, so the scope is `input`.
+Consequence to state to users: PII that the model itself produces (e.g. a public
+figure's name) is not masked on the way back. The order-dependent behaviour of
+`both` + `output_parse_pii` is worth an upstream report; not a blocker here.

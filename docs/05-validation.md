@@ -70,8 +70,15 @@ Finding (2026-09-16, first run): the mock reply carried `<EMAIL_ADDRESS_1>` whil
 request produced `<EMAIL_ADDRESS_2>` (numbering above), so only the person was
 restored; config.yaml corrected, a placeholder without mapping is passed through
 unchanged. The streaming run returned `<PERSON> <EMAIL_ADDRESS_1>`: the restored name
-had been masked again with an un-numbered token, which in this version only the
-log-redaction pass produces; investigated in §5.4a.
+had been masked again with an un-numbered token. Root cause (DEBUG capture, then
+`guardrail_initializers.initialize_presidio` of 1.100.1): `presidio_filter_scope`
+defaults to `both`, which registers three guardrail instances, the third with
+`apply_to_output=True`, masking PII in the model's reply towards the user. On the
+streaming path it runs after the unmasker (restored values re-masked), on the
+non-streaming path before it (no effect), hence the asymmetry. Fix:
+`presidio_filter_scope: input` in config.yaml (D-27); two instances remain, no output
+masker. Log redaction was the first suspect and is cleared: the masking happened in the
+post_call phase, before the logging_only phase.
 
 Streaming path (the restore logic is separate for streams):
 
