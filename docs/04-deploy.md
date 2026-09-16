@@ -59,19 +59,23 @@ reported there, before anything runs. To read one generated service in full:
 ## 4.3 Start in order and watch
 
 Start the services one at a time so that each one's log is read before the next
-depends on it. A unit with `Notify=healthy` only reports "started" once its health
+depends on it. Logs are read from the admin account: journald keeps the output of
+system accounts (uid below 1000, `llmgw` is 989) in the system journal, which `llmgw`
+cannot open, and `podman logs` with the journald driver reads the same files. The
+filter `_SYSTEMD_USER_UNIT=<unit>` selects one gateway unit; `journalctl --user-unit`
+does not work here because as root it also matches uid 0 (D-25). A unit with `Notify=healthy` only reports "started" once its health
 check passes, so `systemctl --user start` blocks until then (or fails).
 
 ```bash
 llmgw$ systemctl --user start llmgw-postgres.service
-llmgw$ journalctl --user -u llmgw-postgres.service -n 30 --no-pager   # "database system is ready to accept connections"
+sudo journalctl _SYSTEMD_USER_UNIT=llmgw-postgres.service -n 30 --no-pager   # (admin) "database system is ready to accept connections"
 llmgw$ ls -l /opt/llm-gateway/postgres/data/                            # 18/ owned by llmgw
 
 llmgw$ systemctl --user start llmgw-presidio-anonymizer.service llmgw-presidio-analyzer.service
-llmgw$ journalctl --user -u llmgw-presidio-analyzer.service -n 20 --no-pager   # 3 gunicorn workers booted (~1 min: spaCy model load)
+sudo journalctl _SYSTEMD_USER_UNIT=llmgw-presidio-analyzer.service -n 20 --no-pager   # (admin) 3 gunicorn workers booted (~1 min: spaCy model load)
 
 llmgw$ systemctl --user start llmgw-litellm.service
-llmgw$ journalctl --user -u llmgw-litellm.service -n 80 --no-pager
+sudo journalctl _SYSTEMD_USER_UNIT=llmgw-litellm.service -n 80 --no-pager   # (admin)
 ```
 
 What a good LiteLLM start looks like in the log:

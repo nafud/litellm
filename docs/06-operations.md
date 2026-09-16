@@ -29,7 +29,7 @@ llmgw$ podman exec -i postgres pg_restore -U litellm -d litellm --clean --if-exi
 ## 6.2 Routine checks
 
 - `llmgw$ systemctl --user list-units 'llmgw-*'` all active; `podman ps` all healthy.
-- `llmgw$ journalctl --user -u llmgw-litellm.service --since -24h | grep -i -E 'error|guardrail'`.
+- `sudo journalctl _SYSTEMD_USER_UNIT=llmgw-litellm.service --since -24h | grep -i -E 'error|guardrail'` (admin; `llmgw` cannot read the journal, D-25).
 - Disk: `llmgw$ podman system df`, `df -h /opt`.
 - Egress drops: `sudo journalctl -k --since -24h | grep llmgw-egress-drop` (expect none).
 - Spend: admin UI or `GET /global/spend/report` with the master key.
@@ -59,7 +59,7 @@ commit, never an unattended pull.
    leaves the old image in place for rollback).
 5. Read the release notes for schema or config changes; take a DB backup (§6.1).
 6. `llmgw$ systemctl --user daemon-reload && systemctl --user restart llmgw-litellm.service`
-   (or the unit that changed), then `journalctl --user -f -u llmgw-litellm.service` for
+   (or the unit that changed), then `sudo journalctl -f _SYSTEMD_USER_UNIT=llmgw-litellm.service` (admin) for
    the migration.
 7. Re-run `docs/05-validation.md` §5.1, §5.3 and §5.4. Remove the old image with
    `podman image prune`.
@@ -100,7 +100,7 @@ logged at zero cost.
   `requester_ip_address` column in `LiteLLM_SpendLogs`.
 - Presidio down: traffic is refused (fail closed). systemd restarts an unhealthy
   container by itself (`HealthOnFailure=kill` + `Restart=always`); if it keeps failing,
-  `journalctl --user -u llmgw-presidio-analyzer.service`, memory (`podman stats`), and
+  `sudo journalctl _SYSTEMD_USER_UNIT=llmgw-presidio-analyzer.service` (admin), memory (`podman stats`), and
   the analyzer `/health`.
 - Provider outage: LiteLLM returns the provider error to the client; no unmasked data is
   involved. Consider `fallbacks` in `litellm_settings` only as a deliberate decision.

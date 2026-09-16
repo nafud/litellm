@@ -302,3 +302,13 @@ so every update is a fresh ZIP download; Unix mode bits do not survive Windows, 
 server side restores the executable bit on the scripts under `bin`; line endings are
 still LF because `git archive` honours `.gitattributes`, and the CRLF check on the
 server remains the gate before anything is copied into place.
+
+## D-25 Gateway logs are read from the admin account
+journald writes the output of system accounts (uid below 1000; `llmgw` is 989) into the
+system journal, never into a per-user journal, so `journalctl --user` as `llmgw` fails
+with "No journal files were opened due to insufficient permissions", and `podman logs`
+with the journald log driver hits the same files. The alternative, adding `llmgw` to the
+`systemd-journal` group, would let the service account read every system log (sshd,
+sudo, kernel); rejected. Logs are read by the admin with
+`sudo journalctl _SYSTEMD_USER_UNIT=<unit>`; the docs/04 and docs/06 commands were
+changed accordingly (2026-09-16).
