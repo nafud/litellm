@@ -1,0 +1,37 @@
+# Local SELinux policy module for the LLM gateway host (docs/04 §4.5).
+#
+# Why: rhsmcertd-worker (subscription-manager) reads /etc/insights-client/machine-id,
+# labelled insights_client_etc_rw_t, and the RHEL 10 policy denies it
+# (selinux-policy-42.1.18-4.el10_2.3). Upstream selinux-policy grants it through
+# insights_client_read_config(rhsmcertd_t) in policy/modules/contrib/rhsmcertd.te
+# (active in the rawhide branch, still commented out in the c10s branch RHEL 10 is
+# built from). The rules below are that interface expanded verbatim:
+#   read_files_pattern(rhsmcertd_t, insights_client_etc_t,    insights_client_etc_t)
+#   read_files_pattern(rhsmcertd_t, insights_client_etc_rw_t, insights_client_etc_rw_t)
+# with search_dir_perms = { getattr search open } and
+#      read_file_perms  = { open getattr read ioctl lock }.
+#
+# Remove (semodule -r llmgw-rhsmcertd-insights) once a selinux-policy update carries the
+# rule: after each policy update, check with
+#   sesearch -A -s rhsmcertd_t -t insights_client_etc_rw_t -c file   (setools-console)
+# or simply remove the module and watch for the AVC to return.
+#
+# Build and install (root):
+#   checkmodule -M -m -o llmgw-rhsmcertd-insights.mod llmgw-rhsmcertd-insights.te
+#   semodule_package -o llmgw-rhsmcertd-insights.pp -m llmgw-rhsmcertd-insights.mod
+#   semodule -i llmgw-rhsmcertd-insights.pp
+
+module llmgw-rhsmcertd-insights 1.0;
+
+require {
+    type rhsmcertd_t;
+    type insights_client_etc_t;
+    type insights_client_etc_rw_t;
+    class dir { getattr search open };
+    class file { open getattr read ioctl lock };
+}
+
+allow rhsmcertd_t insights_client_etc_t:dir { getattr search open };
+allow rhsmcertd_t insights_client_etc_t:file { open getattr read ioctl lock };
+allow rhsmcertd_t insights_client_etc_rw_t:dir { getattr search open };
+allow rhsmcertd_t insights_client_etc_rw_t:file { open getattr read ioctl lock };
