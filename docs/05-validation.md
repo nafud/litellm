@@ -178,10 +178,21 @@ on the server. Phase 7 then consists of:
 
 ## 5.8 Admin UI
 
-`http://127.0.0.1:4000/ui` via an SSH tunnel (`ssh -L 4000:127.0.0.1:4000 <admin>@<server>`),
-login with `UI_USERNAME` / `UI_PASSWORD`. Confirm: models are listed but not editable
-(config-driven), the key from 5.6 appears with its budget, and there is no way to add
-provider credentials.
+`http://127.0.0.1:4000/ui` via an SSH tunnel from the workstation
+(`ssh -L 4000:127.0.0.1:4000 infosec@10.50.4.68`, kept open in its own window; the
+server's `AllowTcpForwarding` must permit local forwarding, `sudo sshd -T | grep -i
+allowtcpforwarding`). Login with `UI_USERNAME` / `UI_PASSWORD`. Confirm:
+
+- Models + Endpoints lists `mock-echo`; "Add Model" is refused with
+  "Set STORE_MODEL_IN_DB=True in your env to enable this feature" (config-driven models,
+  `STORE_MODEL_IN_DB=False` in the unit);
+- Virtual Keys shows `validation-dev1` with its $5 budget and `mock-echo` only;
+- do not use the Credentials tab. Verified in the 1.100.1 source: `POST /credentials`
+  writes to the database (encrypted with `SALT_KEY`) with no `STORE_MODEL_IN_DB` guard,
+  while the reload of stored credentials is scheduled only when `store_model_in_db` is
+  true. An entry made there could not be attached to a model and would be dropped from
+  memory at the next restart, but it would sit in the database. Provider keys stay in
+  `litellm.env` only (D-19, §6.5).
 
 ## 5.9 Clean up and record
 
