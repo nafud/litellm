@@ -449,8 +449,9 @@ the first start, docs/07 §7.5). `ENABLE_PERSISTENT_CONFIG=false`: every setting
 and the env file and the admin panel cannot change them across restarts, the same
 principle as `STORE_MODEL_IN_DB=False`. `OFFLINE_MODE=true` on the Internal network.
 One LiteLLM virtual key for the front-end (alias `openwebui`, `gemini-2.5-flash` only,
-monthly budget); per-person accounting through `X-OpenWebUI-User-Id` mapped by LiteLLM's
-`user_header_name` to `end_user`; the opaque id rather than the e-mail because LiteLLM
+or `nemotron-3-super` while the D-31 amendment applies; monthly budget); per-person
+accounting through `X-OpenWebUI-User-Id` mapped by LiteLLM's `user_header_name` to
+`end_user`; the opaque id rather than the e-mail because LiteLLM
 also copies the value into the OpenAI `user` field, which some providers accept (Gemini
 does not; `drop_params` removes it). Background generations after each answer: title
 kept, tags, follow-ups and autocomplete off; community sharing, code execution, code

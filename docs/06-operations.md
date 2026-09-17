@@ -73,7 +73,8 @@ commit, never an unattended pull.
 6. `llmgw$ systemctl --user daemon-reload && systemctl --user restart llmgw-litellm.service`
    (or the unit that changed), then `sudo journalctl -f _SYSTEMD_USER_UNIT=llmgw-litellm.service` (admin) for
    the migration.
-7. Re-run `docs/05-validation.md` §5.1, §5.3 and §5.4. Remove the old image with
+7. Re-run `docs/05-validation.md` §5.1, §5.3 and §5.4, then one call to the real model
+   (§5.7a step 3; §5.7 step 3 once Gemini is in use). Remove the old image with
    `podman image prune`.
 
 Rollback = reinstall the previous unit (the old image is still in storage until pruned),
@@ -86,8 +87,11 @@ migration, restore the DB dump from step 5 first.
 |--------|----------|-----------|
 | Provider API keys | on schedule / on suspicion | new key in `litellm/litellm.env`, `systemctl --user restart llmgw-litellm.service`, revoke old key at the provider |
 | `LITELLM_MASTER_KEY` | on suspicion, staff change | edit `litellm/litellm.env`, restart litellm; virtual keys are unaffected |
-| Virtual keys | per user policy | `POST /key/regenerate` or `/key/delete` + `/key/generate` |
+| Virtual keys | per user policy | `/key/generate` a new key under a new alias, hand it out, then `/key/delete` the old one by alias. `/key/regenerate` is refused without an enterprise licence in 1.100.1 (`key_management_endpoints.py`; only the master key may be regenerated), and aliases are unique across keys |
+| `openwebui` virtual key | with the other virtual keys | new key as in docs/07 §7.4 under a new alias, into `openwebui/openwebui.env`, `systemctl --user restart llmgw-openwebui.service`, delete the old key by alias |
 | `UI_PASSWORD` | with master key | edit `litellm/litellm.env`, restart |
+| `WEBUI_SECRET_KEY` | on suspicion | edit `openwebui/openwebui.env`, restart `llmgw-openwebui.service`; every user is logged out, nothing else depends on it |
+| Open WebUI database password | rarely | `ALTER USER openwebui PASSWORD '...'` as for `litellm`, update `DATABASE_URL` in `openwebui/openwebui.env`, restart `llmgw-openwebui.service` |
 | `POSTGRES_PASSWORD` | rarely | `podman exec -it postgres psql -U litellm -c "ALTER USER litellm PASSWORD '...'"`, update `postgres.env` and `DATABASE_URL`, restart litellm |
 | `LITELLM_SALT_KEY` | **never** | changing it orphans encrypted DB content |
 
@@ -95,14 +99,18 @@ migration, restore the DB dump from step 5 first.
 
 Edit `deploy/opt/litellm/config.yaml` in the repository (and `litellm/litellm.env` on
 the server for a new provider key), commit, `scp` and install the file as `llmgw`, then
-`systemctl --user restart llmgw-litellm.service`. Model IDs
-must exist in LiteLLM's cost map for spend tracking to work; unknown IDs are accepted but
-logged at zero cost.
+`systemctl --user restart llmgw-litellm.service`. An id absent from LiteLLM's cost map
+is accepted, but LiteLLM sets its `response_cost` to None (1.100.1 `litellm_logging.py`,
+"not found in completion cost map"), so budgets do not see it; state
+`input_cost_per_token` and `output_cost_per_token` in the entry instead, as the
+`nemotron-3-super` entry does, so spend accounting does not depend on the map.
 
 ## 6.6 Onboarding a client
 
-- Chat UI (Open WebUI, LibreChat): base URL `http://<gateway>:4000/v1`, a virtual key
-  created for that application with a team and budget.
+- Open WebUI (deployed, docs/07): its virtual key `openwebui` sits in
+  `openwebui/openwebui.env`, base URL `http://litellm:4000/v1` on the internal network;
+  users are created by its admin (docs/07 §7.6). Another chat application would get its
+  own key and budget the same way.
 - Developer tools (OpenCode, Claude Code): one virtual key per developer, scoped
   `models`, `max_budget` and `budget_duration`; hand out via the password manager.
 
@@ -115,7 +123,9 @@ logged at zero cost.
   `sudo journalctl _SYSTEMD_USER_UNIT=llmgw-presidio-analyzer.service` (admin), memory (`podman stats`), and
   the analyzer `/health`.
 - Provider outage: LiteLLM returns the provider error to the client; no unmasked data is
-  involved. Consider `fallbacks` in `litellm_settings` only as a deliberate decision.
+  involved. Open WebUI shows that error text to the user as it is, and a failure after
+  the stream has begun as an empty answer (docs/07 §7.8). Consider `fallbacks` in
+  `litellm_settings` only as a deliberate decision.
 - Host compromise suspected: the containers run as `llmgw` without capabilities; check
   `sudo ausearch -k gateway -ts recent` and `sudo journalctl -k | grep llmgw-egress-drop`.
 

@@ -3,8 +3,9 @@
 Users never get the LiteLLM admin UI. They get Open WebUI (chosen in D-30), one more
 rootless container on the same host, whose only model source is LiteLLM on the internal
 network. Prerequisite: docs/05 §5.7 passed, because the front-end's virtual key lists
-`gemini-2.5-flash` only. The container work takes about an hour; what remains afterwards
-is exposure (TLS, DNS name, firewalld), which is §7.8 and D-10.
+`gemini-2.5-flash` only (§5.7a and `nemotron-3-super` while the Gemini key is missing).
+The container work takes about an hour; what remains afterwards is exposure (TLS, DNS
+name, firewalld), which is §7.8 and D-10.
 
 Files added to the repository for this phase: `deploy/opt/openwebui/llmgw-openwebui.container`
 (every setting, with the reason for each), `deploy/opt/openwebui/openwebui.env.example`
@@ -195,6 +196,22 @@ Not part of this phase, in this order: TLS termination and a DNS name (D-10), fi
 enabled with a source range for the users (D-22, docs/02 §2.7), the second
 `PublishPort=` on this unit, Active Directory login through the LDAP settings of the
 unit, and the OpenCode client configuration for developers.
+
+Front-end findings from the first day (2026-09-17), to settle before users are invited;
+each becomes an entry in `DECISIONS.md` when it is acted on:
+
+- LiteLLM's error text reaches the user unchanged. On a 429 from OpenRouter the browser
+  showed the provider's message, account details included. Either a shorter message in
+  the front-end, or accepted for the pilot.
+- An upstream failure after the stream has begun (NVIDIA "Service temporarily
+  overloaded", docs/05 §5.7a) ends as an empty answer, not an error: the 200 header has
+  already been sent, and no spend-log row is written. The user regenerates the answer.
+- Every new chat sends a second request for its title (`ENABLE_TITLE_GENERATION=true`),
+  so 25 new chats exhaust the testing provider's 50 requests per day. Keep it, or turn
+  it off while the free tier is in use.
+- The folded reasoning block shows the placeholders (`<CREDIT_CARD_1>`) and the answer
+  text the restored values: LiteLLM restores the answer content only. Not a defect;
+  the users see how their prompt left the bank.
 
 ## Results
 

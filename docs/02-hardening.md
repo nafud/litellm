@@ -224,7 +224,7 @@ the new kernel. Files installed while SELinux is disabled are unlabeled, which t
 relabel of §2.1 covers.
 
 ```bash
-sudo dnf -q check-update | grep -E '^(kernel|selinux-policy|systemd|glibc|openssh|podman|container)' 
+sudo dnf -q check-update | grep -E '^(kernel|selinux-policy|systemd|glibc|openssh|podman|container)'
 sudo dnf upgrade                              # review the transaction summary, then y
 rpm -q kernel selinux-policy-targeted | sort  # the newest kernel is installed alongside the running one
 cat /etc/redhat-release

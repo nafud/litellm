@@ -58,8 +58,10 @@ Every image is pinned by its `linux/amd64` manifest digest on the `Image=` line 
 unit; `deploy/opt/bin/images.tsv` maps each pin to the multi-arch index it comes from
 (D-13, D-18). Runtime: Podman 5, rootless, Quadlet units under the `llmgw` user's
 systemd manager, on RHEL 10 (D-11). Images are pulled on the server by pinned digest;
-the deployment tree travels from the workstation by `scp`. The LLM provider is chosen
-after the stack is validated (D-19); `api.anthropic.com` in the diagram is an example.
+the deployment tree travels from the workstation by `scp`. Provider: Google Gemini (D-29)
+once its key exists; until then OpenRouter's free tier serves as the testing provider
+(D-31, docs/05 §5.7a). `api.anthropic.com` and `api.openai.com` in the diagram are
+examples of further entries.
 Presidio's images moved from `mcr.microsoft.com` to `ghcr.io/data-privacy-stack` in 2026;
 older tutorials still reference the Microsoft registry.
 
@@ -68,15 +70,15 @@ older tutorials still reference the Microsoft registry.
 | # | Phase | Document | Status |
 |---|-------|----------|--------|
 | 0 | Repository and reference material | this file, `DECISIONS.md` | done |
-| 1 | Server assessment (read-only) | `docs/01-server-assessment.md`, `scripts/assess.sh` | done 2026-09-14; open questions in §1.3 |
+| 1 | Server assessment (read-only) | `docs/01-server-assessment.md`, `scripts/assess.sh` | done 2026-09-14; the questions of §1.3 answered in §1.14 (2026-09-15), SSH source ranges still open |
 | 2 | Host hardening (RHEL 10): SELinux, SSH, firewalld, egress | `docs/02-hardening.md`, `deploy/host/` | SELinux enforcing 2026-09-16 (§4.5); SSH, sysctl, firewalld, egress deferred (D-22) |
 | 3 | Package source, Podman, service account, /opt tree, images | `docs/03-podman-install.md`, `scripts/verify-pins.sh`, `deploy/opt/bin/` | done 2026-09-16 |
 | 4 | Deploy the stack (Quadlet) | `docs/04-deploy.md`, `deploy/opt/` | done 2026-09-16; audit rules and reboot test wait for the patch window (§4.5) |
-| 5 | Validation: health, keys, masking end to end (mock model) | `docs/05-validation.md` | 5.1 to 5.6, 5.8, 5.9 pass 2026-09-16; 5.7 and 5.10 wait for the provider (D-19) |
-| 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | **next** |
+| 5 | Validation: health, keys, masking end to end (mock model) | `docs/05-validation.md` | 5.1 to 5.6, 5.8, 5.9 pass 2026-09-16; 5.7 passed 2026-09-17 with the testing provider (§5.7a); 5.10 (port 4000 on the LAN) belongs to the exposure work |
+| 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | procedures written; **next**: first dump with restore test (§6.1) and routine checks (§6.2); schedule and off-host copy wait for D-28 |
 | 7 | Provider choice, key, real round trip | `docs/05-validation.md` §5.7 | Gemini chosen 2026-09-16 (D-29), key not yet obtained; OpenRouter free tier as testing provider (`nemotron-3-super`) since 2026-09-17, round trip through the browser verified (D-31, §5.7a); Gemini steps wait for the key |
 | 8 | Open WebUI for the users | `docs/07-openwebui.md`, `deploy/opt/openwebui/` | deployed 2026-09-17 (D-30, D-32), masking round trip through the browser verified; on `nemotron-3-super` since §5.7a; exposure (TLS, DNS, firewalld) open |
-| later | TLS termination, SSO for the admin UI, client onboarding | to be decided after phase 5 | open |
+| later | Exposure (TLS termination, DNS name, firewalld), Active Directory login, OpenCode client per developer, front-end findings | `docs/07-openwebui.md` §7.8, D-10, D-22 | open |
 
 ## Repository layout
 
@@ -86,6 +88,7 @@ deploy/
     litellm/                llmgw-litellm.container, config.yaml, litellm.env.example
     presidio/               llmgw-presidio-analyzer.container, llmgw-presidio-anonymizer.container
     postgres/               llmgw-postgres.container, postgres.env.example
+    openwebui/              llmgw-openwebui.container, openwebui.env.example
     network/                llmgw-backend.network (internal), llmgw-egress.network
     bin/                    images.tsv (pins), litellm-cosign.pub, pull-images.sh, link-quadlets.sh
   llmgw/storage.conf        ~llmgw/.config/containers/storage.conf (image store under /opt)
@@ -105,6 +108,7 @@ On the server (`/opt` as required, D-12):
   litellm/                       unit, config.yaml, litellm.env (0600)
   presidio/                      units (stateless; analyzer configuration later)
   postgres/                      unit, postgres.env (0600), data/ (0700), backups/
+  openwebui/                     unit, openwebui.env (0600), data/ (uploads, vector store)
   network/                       the two network units
   bin/                           scripts, image table, cosign key
   storage/                       Podman image store of llmgw (graphroot)
