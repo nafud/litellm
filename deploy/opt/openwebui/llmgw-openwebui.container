@@ -65,7 +65,12 @@ Environment=ENABLE_AUTOCOMPLETE_GENERATION=false
 # Address as the users see it; changes together with PublishPort when TLS and DNS exist (D-10).
 Environment=WEBUI_URL=http://127.0.0.1:8080
 # Uploads, the vector store (chroma) and caches. Chats, users and settings are in PostgreSQL.
-Volume=/opt/llm-gateway/openwebui/data:/app/backend/data:Z
+# Mounted at /data, not at the image's default /app/backend/data: the embedding, whisper
+# and tiktoken models are baked into the image under /app/backend/data/cache, and a bind
+# mount there hides them (seen at the first start, docs/07 §7.5; upstream's compose relies
+# on Docker copying image content into an empty named volume, which a bind mount never does).
+Environment=DATA_DIR=/data
+Volume=/opt/llm-gateway/openwebui/data:/data:Z
 # Loopback only, reached through an SSH tunnel, like the LiteLLM admin UI (docs/05 §5.8).
 PublishPort=127.0.0.1:8080:8080
 Network=llmgw-backend.network

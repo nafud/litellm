@@ -419,7 +419,10 @@ and files in the data directory come out owned by `llmgw`, the same effect keep-
 PostgreSQL. Its relational data goes into a second database (`openwebui`) in the existing
 PostgreSQL container so that one dump procedure covers everything (docs/06 §6.1); the
 vector store stays in the data directory (chroma; pgvector would need an extension the
-stock image lacks). `ENABLE_PERSISTENT_CONFIG=false`: every setting comes from the unit
+stock image lacks). The data directory is mounted at `/data` (`DATA_DIR=/data`), not at
+the image's default `/app/backend/data`, because the image bakes its embedding, whisper
+and tiktoken models under that default path and a bind mount there hides them (found at
+the first start, docs/07 §7.5). `ENABLE_PERSISTENT_CONFIG=false`: every setting comes from the unit
 and the env file and the admin panel cannot change them across restarts, the same
 principle as `STORE_MODEL_IN_DB=False`. `OFFLINE_MODE=true` on the Internal network.
 One LiteLLM virtual key for the front-end (alias `openwebui`, `gemini-2.5-flash` only,

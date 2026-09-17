@@ -119,7 +119,17 @@ Expected: `MemoryMax=4294967296`; the start returns once the health check passes
 three minutes on first start: migrations, then the embedding model loads); five
 containers `healthy`; the log shows the migrations, the version banner and
 `Uvicorn running on http://0.0.0.0:8080`, no `ERROR` and no attempt to reach
-`huggingface.co` or `github.com`.
+`huggingface.co` or `github.com`. The unit logs to journald, so read it from the admin
+account: `sudo journalctl _SYSTEMD_USER_UNIT=llmgw-openwebui.service --since -10m --no-pager -o cat`.
+
+First start on 2026-09-17: healthy in 30 s, 759 MB, but the log carried
+`ERROR ... Error loading SentenceTransformer: Cannot find an appropriate cached snapshot
+folder ... outgoing traffic has been disabled`. Cause: the unit mounted the data
+directory at `/app/backend/data`, where the image keeps its baked-in models under
+`cache/`, so the bind mount hid them. Fixed in the unit with `DATA_DIR=/data` and the
+volume at `/data` (verified in v0.11.3 env.py: `DATA_DIR` is read from the environment;
+retrieval/utils.py looks the model up through `SENTENCE_TRANSFORMERS_HOME`, which stays
+inside the image). The data directory was emptied before the restart (no account existed yet).
 
 ## 7.6 First admin account and round trip (workstation, browser)
 
