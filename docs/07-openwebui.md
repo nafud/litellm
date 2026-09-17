@@ -153,11 +153,12 @@ Checks, in order:
    Expected: the reply contains `Hello Dennis Yurichev`; the chat gets a title (one
    background call).
 3. Admin Panel, Users: note the admin's id (a UUID). On the server, the spend log carries
-   it as `end_user`, the prompt and response bodies stay empty, and the request came
-   through the `openwebui` key:
+   it as `end_user`, the prompt and response columns hold the literal `{}` that LiteLLM
+   writes when `store_prompts_in_spend_logs` is false (verified in 1.100.1
+   spend_tracking_utils.py), and the request came through the `openwebui` key:
 
    ```bash
-   llmgw$ podman exec postgres psql -U litellm -d litellm -tAc "select \"startTime\", model, end_user, spend, coalesce(messages::text,'') = '' as no_prompt, coalesce(response::text,'') = '' as no_response from \"LiteLLM_SpendLogs\" order by \"startTime\" desc limit 3"
+   llmgw$ podman exec postgres psql -U litellm -d litellm -tAc "select \"startTime\", model, end_user, spend, messages::text = '{}' as no_prompt, response::text = '{}' as no_response from \"LiteLLM_SpendLogs\" order by \"startTime\" desc limit 3"
    llmgw$ podman exec postgres psql -U litellm -d litellm -tAc "select key_alias, spend from \"LiteLLM_VerificationToken\" where key_alias='openwebui'"
    ```
 
