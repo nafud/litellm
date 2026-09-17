@@ -173,8 +173,9 @@ cannot safely reference environment variables in the health command.
 ## D-15 Resource budget as cgroup ceilings
 *Amended 2026-09-17 (D-32): LiteLLM's ceiling is cut from 6 GiB to 4 GiB and the 2 GiB
 go to Open WebUI (`MemoryMax=2G`, `CPUQuota=100%`). The sum stays 13.5 GiB. Basis: the
-expected working set of LiteLLM below (1 to 2 GiB); the measurement of docs/07 §7.7
-confirms or revises it.*
+expected working set of LiteLLM below (1 to 2 GiB). Measured the same day (docs/07 §7.7):
+LiteLLM 906 MB, Open WebUI 778 MB, analyzer 2.2 GB, anonymizer 56 MB, PostgreSQL 270 MB,
+host 5.2 GB used of 15.7 GB. Confirmed.*
 
 *Amended 2026-09-14: the Cortex XDR agent uses about 1 GiB of the host (docs/01 §1.7),
 so the "about 1.5 GiB for the OS" below is shared with it. The ceilings stay: they are
