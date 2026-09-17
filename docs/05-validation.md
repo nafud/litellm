@@ -261,8 +261,21 @@ Result 2026-09-17: all four steps pass with `nemotron-3-super`. Master-key reply
 meet you!" with the reasoning shown as a folded "Thought for less than a second" block.
 Two spend-log rows under the user's id per new chat, the answer with
 `{"PERSON": 1, "EMAIL_ADDRESS": 1}` and the title generation with one more LOCATION
-detection in its prompt; so a fresh chat costs two of the 50 daily requests. Phase 7 is
-closed for the testing provider; the Gemini steps stay for the paid phase.
+detection in its prompt; so a fresh chat costs two of the 50 daily requests.
+
+Demonstration prompt, same day, with the Mastercard sandbox number 5555 5555 5555 4444:
+"My card number is 5555 5555 5555 4444. Is it Visa or Mastercard? Answer with the brand
+only and quote the number you see." The model's reasoning block, shown unmasked by Open
+WebUI, discusses only `<CREDIT_CARD_1>` ("it's a placeholder, not actual digits, so we
+cannot determine brand"), guesses Visa, which is wrong, and answers
+`Visa "<CREDIT_CARD_1>"`; the browser shows `Visa "5555 5555 5555 4444"` because
+LiteLLM restores the value in the answer text. The placeholder stays visible in the
+reasoning block: the restore step applies to the answer content only. A first attempt at
+this prompt returned an empty answer: NVIDIA reported "Service temporarily overloaded"
+after the stream had begun (`MidStreamFallbackError` in the LiteLLM log), which the
+front-end shows as an empty reply rather than an error; noted for the front-end
+hardening list. Phase 7 is closed for the testing provider; the Gemini steps stay for
+the paid phase.
 
 Reverting to Gemini later: steps 2 and 3 above with the Gemini key, then `/key/update`
 with `["gemini-2.5-flash"]`; the `nemotron-3-super` entry and `OPENROUTER_API_KEY` line
