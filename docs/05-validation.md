@@ -255,6 +255,15 @@ Steps, same shape as 1 to 3 above:
    §7.6 through the browser and confirm the new spend-log row carries the user's
    `end_user` id and `nemotron-3-super`.
 
+Result 2026-09-17: all four steps pass with `nemotron-3-super`. Master-key reply
+`Hello Dennis Yurichev`, spend-log row `{"PERSON": 1}`, `no_prompt` `t`; key switched
+(`['nemotron-3-super'] openwebui`); browser reply "Hello Dennis Yurichev, it's great to
+meet you!" with the reasoning shown as a folded "Thought for less than a second" block.
+Two spend-log rows under the user's id per new chat, the answer with
+`{"PERSON": 1, "EMAIL_ADDRESS": 1}` and the title generation with one more LOCATION
+detection in its prompt; so a fresh chat costs two of the 50 daily requests. Phase 7 is
+closed for the testing provider; the Gemini steps stay for the paid phase.
+
 Reverting to Gemini later: steps 2 and 3 above with the Gemini key, then `/key/update`
 with `["gemini-2.5-flash"]`; the `nemotron-3-super` entry and `OPENROUTER_API_KEY` line
 are removed when the account is closed.

@@ -74,8 +74,8 @@ older tutorials still reference the Microsoft registry.
 | 4 | Deploy the stack (Quadlet) | `docs/04-deploy.md`, `deploy/opt/` | done 2026-09-16; audit rules and reboot test wait for the patch window (§4.5) |
 | 5 | Validation: health, keys, masking end to end (mock model) | `docs/05-validation.md` | 5.1 to 5.6, 5.8, 5.9 pass 2026-09-16; 5.7 and 5.10 wait for the provider (D-19) |
 | 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | **next** |
-| 7 | Provider choice, key, real round trip | `docs/05-validation.md` §5.7 | Gemini chosen 2026-09-16 (D-29), key not yet obtained; OpenRouter free tier as testing provider from 2026-09-17 (D-31, §5.7a); **in progress** |
-| 8 | Open WebUI for the users | `docs/07-openwebui.md`, `deploy/opt/openwebui/` | deployed 2026-09-17 (D-30, D-32), masking round trip through the browser verified; runs on `mock-echo` until §5.7; exposure (TLS, DNS, firewalld) open |
+| 7 | Provider choice, key, real round trip | `docs/05-validation.md` §5.7 | Gemini chosen 2026-09-16 (D-29), key not yet obtained; OpenRouter free tier as testing provider (`nemotron-3-super`) since 2026-09-17, round trip through the browser verified (D-31, §5.7a); Gemini steps wait for the key |
+| 8 | Open WebUI for the users | `docs/07-openwebui.md`, `deploy/opt/openwebui/` | deployed 2026-09-17 (D-30, D-32), masking round trip through the browser verified; on `nemotron-3-super` since §5.7a; exposure (TLS, DNS, firewalld) open |
 | later | TLS termination, SSO for the admin UI, client onboarding | to be decided after phase 5 | open |
 
 ## Repository layout
