@@ -340,3 +340,7 @@ sudo firewall-cmd --reload && sudo firewall-cmd --list-rich-rules
 ```
 
 Plain HTTP on the LAN is acceptable only until TLS termination is in place (D-10).
+
+*Superseded 2026-09-17 (D-33):* port 4000 is not opened to a client subnet. When
+litellm.xalqbank.az goes live it is published for the WAF address only, like Open WebUI
+in docs/08, and the WAF exposes `/v1/` alone.

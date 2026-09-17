@@ -195,7 +195,9 @@ above 3 GiB, revisit the split before any user is invited.
 Not part of this phase, in this order: TLS termination and a DNS name (D-10), firewalld
 enabled with a source range for the users (D-22, docs/02 §2.7), the second
 `PublishPort=` on this unit, Active Directory login through the LDAP settings of the
-unit, and the OpenCode client configuration for developers.
+unit, and the OpenCode client configuration for developers. *2026-09-17:* the first
+three became docs/08 (FortiWeb in front, D-33); the second `PublishPort=` is not needed,
+the existing one moves to the host address.
 
 Front-end findings from the first day (2026-09-17), to settle before users are invited;
 each becomes an entry in `DECISIONS.md` when it is acted on:

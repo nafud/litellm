@@ -398,6 +398,11 @@ sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" 
 sudo firewall-cmd --reload && sudo firewall-cmd --list-all
 ```
 
+*2026-09-17:* firewalld is enabled in docs/08 §8.3 (WAF exposure) with the `ssh` service
+left in the zone, because the admin ranges are still unknown; the two SSH rich rules
+below and the removal of the `ssh` service are applied when they are. The Zabbix rule
+is part of §8.3 so that enabling firewalld does not break monitoring.
+
 `<admin-cidr>` and `<ansible-cidr>` come from docs/01 question 5 (logins seen from
 10.240.234.19 and 10.50.12.2 for `infosec`, 10.100.8.50 and 10.100.7.60 for `devops`).
 The Cortex XDR agent on 33221 gets no rule unless its administrators say it needs one

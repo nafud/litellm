@@ -461,3 +461,31 @@ interpreter, web search, image generation and arena models off. Loopback port 80
 through an SSH tunnel until D-10 is settled. Local accounts for the pilot, first account
 is the admin, sign-up closed, new accounts pending until activated; LDAP and OIDC settings
 exist in the same unit for the Active Directory step.
+
+## D-33 Exposure through the FortiWeb WAF; plain HTTP on the WAF-to-server leg
+Decided 2026-09-17. The users reach Open WebUI as `https://openwebui.xalqbank.az`
+through the bank's FortiWeb WAF, which holds the certificate (issued by the WAF's CA,
+trusted on the workstations), terminates TLS and forwards to `10.50.4.68:8080` over
+plain HTTP. No reverse proxy is added on the server: the WAF already is one, and a
+rootless container cannot bind 443 (`net.ipv4.ip_unprivileged_port_start` is 1024,
+docs/02 §2.7; lowering it would let every account bind privileged ports, and a root
+container contradicts D-11). Resolves D-10 for the users' side; the LiteLLM admin UI
+stays on the SSH tunnel.
+
+The WAF-to-server leg is unencrypted by choice (option 1 of two considered). It is
+confined by firewalld to the WAF's address `10.50.4.100`, so the only path to the
+container runs through the WAF and the forwarded client address cannot be forged
+(`FORWARDED_ALLOW_IPS` in the unit; uvicorn's default trusts everyone). Option 2, TLS on
+that leg too, was verified possible: LiteLLM 1.100.1 terminates TLS itself
+(`--ssl_certfile_path`, `--ssl_keyfile_path`), Open WebUI v0.11.3 cannot (its start
+script passes no TLS option to uvicorn) and would need a terminator on the server. Kept
+as the upgrade path if policy requires it. Consequences: the WAF sees prompts in clear
+before Presidio, so its request-body logging is off for this name; the session cookie
+carries the Secure flag; firewalld comes up now (D-22 deferral ends) with the `ssh`
+service still open until the admin ranges are known.
+
+`litellm.xalqbank.az` is the second step, for developer tools with a virtual key each
+(docs/06 §6.6), and waits for the first such key: on the free tier one coding assistant
+would exhaust the account's 50 requests per day. Same layout with port 4000,
+`use_x_forwarded_for: true`, and the WAF exposing `/v1/` only; supersedes docs/05
+§5.10's client-subnet rule.

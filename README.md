@@ -28,9 +28,11 @@ flowchart LR
     owui --> pg
     owui -- "http://litellm:4000/v1" --> litellm
   end
+  waf["FortiWeb WAF<br/>openwebui.xalqbank.az<br/>certificate, TLS ends here"]
   fw["Egress firewall<br/>allow api.* from gateway host only"]
   prov["Provider APIs<br/>api.anthropic.com<br/>api.openai.com<br/>Gemini API<br/>(see placeholders only)"]
-  ui -- "https (D-10)" --> owui
+  ui -- "https" --> waf
+  waf -- "http 10.50.4.68:8080<br/>from the WAF only (firewalld)" --> owui
   dev -- "base URL http://gateway:4000/v1" --> litellm
   litellm --> fw --> prov
 ```
@@ -77,8 +79,9 @@ older tutorials still reference the Microsoft registry.
 | 5 | Validation: health, keys, masking end to end (mock model) | `docs/05-validation.md` | 5.1 to 5.6, 5.8, 5.9 pass 2026-09-16; 5.7 passed 2026-09-17 with the testing provider (§5.7a); 5.10 (port 4000 on the LAN) belongs to the exposure work |
 | 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | procedures written; **next**: first dump with restore test (§6.1) and routine checks (§6.2); schedule and off-host copy wait for D-28 |
 | 7 | Provider choice, key, real round trip | `docs/05-validation.md` §5.7 | Gemini chosen 2026-09-16 (D-29), key not yet obtained; OpenRouter free tier as testing provider (`nemotron-3-super`) since 2026-09-17, round trip through the browser verified (D-31, §5.7a); Gemini steps wait for the key |
-| 8 | Open WebUI for the users | `docs/07-openwebui.md`, `deploy/opt/openwebui/` | deployed 2026-09-17 (D-30, D-32), masking round trip through the browser verified; on `nemotron-3-super` since §5.7a; exposure (TLS, DNS, firewalld) open |
-| later | Exposure (TLS termination, DNS name, firewalld), Active Directory login, OpenCode client per developer, front-end findings | `docs/07-openwebui.md` §7.8, D-10, D-22 | open |
+| 8 | Open WebUI for the users | `docs/07-openwebui.md`, `deploy/opt/openwebui/` | deployed 2026-09-17 (D-30, D-32), masking round trip through the browser verified; on `nemotron-3-super` since §5.7a; exposure is phase 9 |
+| 9 | Exposure through the FortiWeb WAF: `openwebui.xalqbank.az`, firewalld | `docs/08-exposure.md` | written 2026-09-17 (D-33); WAF policy, DNS and §8.2 to §8.4 to run |
+| later | `litellm.xalqbank.az` (first developer key), SSH source ranges, egress policy, Active Directory login, front-end findings | `docs/08-exposure.md` §8.5, `docs/07-openwebui.md` §7.8, D-22 | open |
 
 ## Repository layout
 

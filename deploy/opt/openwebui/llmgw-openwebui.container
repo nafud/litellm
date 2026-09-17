@@ -1,5 +1,6 @@
 # Open WebUI: the users' chat front-end (D-30). Its only model source is LiteLLM on the
-# internal network; nothing here reaches the Internet. Loopback only until TLS (D-10).
+# internal network; nothing here reaches the Internet. Reached by the users through the
+# FortiWeb WAF at https://openwebui.xalqbank.az (D-33, docs/08).
 [Unit]
 Description=LLM gateway: Open WebUI
 # Its relational data lives in the PostgreSQL container (DATABASE_URL in the env file).
@@ -62,8 +63,14 @@ Environment=ENABLE_TITLE_GENERATION=true
 Environment=ENABLE_TAGS_GENERATION=false
 Environment=ENABLE_FOLLOW_UP_GENERATION=false
 Environment=ENABLE_AUTOCOMPLETE_GENERATION=false
-# Address as the users see it; changes together with PublishPort when TLS and DNS exist (D-10).
-Environment=WEBUI_URL=http://127.0.0.1:8080
+# Address as the users see it (D-33): the WAF holds the certificate for this name.
+Environment=WEBUI_URL=https://openwebui.xalqbank.az
+# Trust X-Forwarded-For and X-Forwarded-Proto only from the WAF (uvicorn's
+# --forwarded-allow-ips, read from this variable in v0.11.3 start.sh; its default is '*').
+Environment=FORWARDED_ALLOW_IPS=10.50.4.100
+# The users reach the site over HTTPS, so the session and auth cookies carry the Secure
+# flag (v0.11.3 env.py: the auth cookie setting inherits this one).
+Environment=WEBUI_SESSION_COOKIE_SECURE=true
 # Uploads, the vector store (chroma) and caches. Chats, users and settings are in PostgreSQL.
 # Mounted at /data, not at the image's default /app/backend/data: the embedding, whisper
 # and tiktoken models are baked into the image under /app/backend/data/cache, and a bind
@@ -71,8 +78,10 @@ Environment=WEBUI_URL=http://127.0.0.1:8080
 # on Docker copying image content into an empty named volume, which a bind mount never does).
 Environment=DATA_DIR=/data
 Volume=/opt/llm-gateway/openwebui/data:/data:Z
-# Loopback only, reached through an SSH tunnel, like the LiteLLM admin UI (docs/05 §5.8).
-PublishPort=127.0.0.1:8080:8080
+# Published on the host address for the WAF (plain HTTP on the WAF-to-server leg, D-33);
+# firewalld accepts this port from the WAF address 10.50.4.100 only (docs/08 §8.3).
+# Until docs/08 §8.3 was run this line read 127.0.0.1:8080:8080 (SSH tunnel, docs/07 §7.6).
+PublishPort=10.50.4.68:8080:8080
 Network=llmgw-backend.network
 DropCapability=all
 NoNewPrivileges=true
