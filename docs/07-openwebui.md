@@ -56,11 +56,14 @@ cosign signature, so this is a digest pin like Presidio and PostgreSQL):
 
 ```bash
 llmgw$ bash /opt/llm-gateway/bin/pull-images.sh
-llmgw$ podman image inspect --format 'user={{.User}} entrypoint={{.Config.Entrypoint}} cmd={{.Config.Cmd}} port={{.Config.ExposedPorts}}' ghcr.io/open-webui/open-webui:v0.11.3
+llmgw$ podman image inspect --format 'user={{.User}} entrypoint={{.Config.Entrypoint}} cmd={{.Config.Cmd}} port={{.Config.ExposedPorts}}' ghcr.io/open-webui/open-webui:v0.11.3@sha256:9cd136effce6bb12a6a1988a35ab3b82cb40c48a6768fceeb17c83baf7cfac9c
 ```
 
 Expected: `RESULT: every unit's Image= resolves in local storage by digest.` and
 `user=0:0` (the unit's comment relies on it; if the user is not 0, stop and report).
+The full `repo:tag@digest` reference is needed: an image pulled by digest is not stored
+under the bare tag. On disk the image is 5.16 GB (1.8 GB compressed): it carries the
+embedding and speech models.
 
 ## 7.3 Database role and the env file (service account)
 
