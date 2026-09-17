@@ -366,3 +366,41 @@ test-only entry (docs/05 §5.9, docs/06 §6.3); user keys never list it. Egress 
 TCP 443 to any address (the nft policy is deferred, D-22); when applied it can be
 narrowed to `generativelanguage.googleapis.com`. Amends D-19: the provider decision is
 made; the phase 7 procedure applies unchanged.
+
+## D-30 User front-end: Open WebUI; webtop rejected
+Decided 2026-09-17. Users must not get the LiteLLM admin UI, so a chat front-end sits
+in front of the gateway. Compared on 2026-09-17 from the projects' own sources and
+registry manifests: Open WebUI 0.11.3, LibreChat 0.8.7, AnythingLLM 1.16.1, Hugging Face
+chat-ui 0.20.0 (NextChat, big-AGI, Dify, Onyx, LobeHub excluded: no per-user accounts,
+or ten-container stacks). Open WebUI is chosen: one container, SQLite or a second
+database in the existing PostgreSQL, LDAP and OIDC with group sync for the later Active
+Directory step, per-model access control, forwards the user's e-mail on every request
+(`ENABLE_FORWARD_USER_INFO_HEADERS`, mapped by LiteLLM `general_settings.user_header_name`,
+both verified in source) so the spend log stays per person, `OFFLINE_MODE`, document
+upload with local text extraction. Runner-up LibreChat (MIT, LDAP, OIDC, SAML) needs
+MongoDB (SSPL image) plus four containers for file chat and admin. AnythingLLM has no
+directory integration and no per-user attribution; chat-ui has no local accounts.
+Licence note for the supervisor: Open WebUI's licence forbids removing its branding
+above 50 users without an enterprise licence; the bank does not rebrand. Chat history
+is stored unmasked in the front-end's database on the server because Presidio runs
+downstream; goes into the backup discussion (D-28).
+
+linuxserver.io webtop was proposed and rejected the same day: it streams a full Linux
+desktop into the browser and has no chat, no model connection and no accounts, so it
+would sit on top of a chat front-end, not replace it. One desktop per container per
+user, nginx basic auth only (the maintainers: "keep the kids out not the internet"),
+passwordless sudo, 1 GB shared memory, seccomp often disabled for Chromium, and a
+browser on a server with Internet access outside Cortex XDR and WinCollect. Not the
+objective.
+
+## D-31 OpenRouter: workable provider, deferred to the paid phase
+Decided 2026-09-17. LiteLLM 1.100.1 supports it without new code (`openrouter/`
+provider, `OPENROUTER_API_KEY`, 100 priced entries in the cost map including
+`openrouter/google/gemini-2.5-flash`); switching is one `model_list` entry and one
+variable. Not chosen for the pilot: a second third party sees every prompt (OpenRouter
+forwards to the vendor); free models are capped at 20 requests per minute and 50 per day
+until 10 dollars of credits are bought, then 1,000 per day, and the account setting that
+excludes providers training on inputs removes most free endpoints. Figures from
+OpenRouter's help centre as read on 2026-09-17, to be confirmed on openrouter.ai before
+use. Becomes attractive when the bank pays: one contract and one key for many vendors,
+and a zero-data-retention routing flag. D-29 stands.
