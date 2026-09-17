@@ -80,6 +80,12 @@ general_settings:
   store_prompts_in_spend_logs: false
   # Fail closed: without the DB there is no key/budget verification.
   allow_requests_on_db_unavailable: false
+  # Per-person accounting behind Open WebUI (D-32): the front-end sends the user's opaque
+  # id in this header on every request; LiteLLM stores it as end_user in the spend log
+  # (verified in 1.100.1 proxy/litellm_pre_call_utils.py get_user_from_headers). The
+  # value is also copied into the OpenAI 'user' field; Gemini does not accept that field
+  # and drop_params removes it, so it never leaves the gateway today.
+  user_header_name: X-OpenWebUI-User-Id
 
 litellm_settings:
   drop_params: true

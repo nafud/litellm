@@ -1,0 +1,96 @@
+# Open WebUI: the users' chat front-end (D-30). Its only model source is LiteLLM on the
+# internal network; nothing here reaches the Internet. Loopback only until TLS (D-10).
+[Unit]
+Description=LLM gateway: Open WebUI
+# Its relational data lives in the PostgreSQL container (DATABASE_URL in the env file).
+Requires=llmgw-postgres.service
+After=llmgw-postgres.service
+# LiteLLM is wanted, not required: the front-end starts and shows an empty model list
+# while LiteLLM restarts, then recovers on its own.
+Wants=llmgw-litellm.service
+After=llmgw-litellm.service
+
+[Container]
+ContainerName=openwebui
+# linux/amd64 manifest digest; listed by index sha256:41daa0cf2561a5d4c8d1ff31ee2a98d93ab4d3ac2605cac69366ff6a3374a933.
+# The project publishes no cosign signature (bin/images.tsv: digest pin only).
+Image=ghcr.io/open-webui/open-webui:v0.11.3@sha256:9cd136effce6bb12a6a1988a35ab3b82cb40c48a6768fceeb17c83baf7cfac9c
+Pull=never
+# The image is built with UID=0 (its Dockerfile default; confirmed after the pull with
+# podman image inspect, docs/07 §7.2): root inside the container, which rootless Podman
+# maps to the llmgw account on the host, with every capability dropped below. Files it
+# writes into the data directory are therefore owned by llmgw on the host.
+# Secrets only this container may see: cookie signing key, its DB password, its LiteLLM key.
+EnvironmentFile=/opt/llm-gateway/openwebui/openwebui.env
+# Single model source: LiteLLM, reached by container name on llmgw-backend, with the
+# virtual key from the env file (OPENAI_API_KEY). The key decides which models appear.
+Environment=ENABLE_OPENAI_API=true
+Environment=OPENAI_API_BASE_URL=http://litellm:4000/v1
+Environment=ENABLE_OLLAMA_API=false
+Environment=ENABLE_DIRECT_CONNECTIONS=false
+# Every setting comes from this unit and the env file, never from the admin panel's
+# database-backed copy: the panel shows these values but cannot change them. Same
+# principle as STORE_MODEL_IN_DB=False for LiteLLM (verified: models/config.py returns
+# the environment defaults when persistence is off).
+Environment=ENABLE_PERSISTENT_CONFIG=false
+# No Hugging Face downloads, no version check. The network is Internal=true anyway; this
+# removes the attempts and their log lines.
+Environment=OFFLINE_MODE=true
+# Accounts: local login. On an empty database the login page offers to create the first
+# account, which becomes admin (routers/auths.py: the first user is not gated by
+# ENABLE_SIGNUP). Afterwards sign-up is refused and the admin creates accounts; new
+# accounts start as 'pending' until the admin activates them.
+Environment=WEBUI_AUTH=true
+Environment=ENABLE_SIGNUP=false
+Environment=ENABLE_LOGIN_FORM=true
+Environment=DEFAULT_USER_ROLE=pending
+# Send the user's opaque id (X-OpenWebUI-User-Id) with every request so LiteLLM records
+# spend per person (general_settings.user_header_name in litellm/config.yaml). The id
+# rather than the e-mail: LiteLLM copies the value into the OpenAI 'user' field, which a
+# provider that accepts that field would receive (Gemini does not; drop_params removes it).
+Environment=ENABLE_FORWARD_USER_INFO_HEADERS=true
+# Features off: they call out of the host, execute code, or add model calls per turn.
+Environment=ENABLE_COMMUNITY_SHARING=false
+Environment=ENABLE_CODE_EXECUTION=false
+Environment=ENABLE_CODE_INTERPRETER=false
+Environment=ENABLE_WEB_SEARCH=false
+Environment=ENABLE_IMAGE_GENERATION=false
+Environment=ENABLE_EVALUATION_ARENA_MODELS=false
+# Background generations after each answer: title kept (one short call), tags,
+# follow-up suggestions and autocomplete off (D-32).
+Environment=ENABLE_TITLE_GENERATION=true
+Environment=ENABLE_TAGS_GENERATION=false
+Environment=ENABLE_FOLLOW_UP_GENERATION=false
+Environment=ENABLE_AUTOCOMPLETE_GENERATION=false
+# Address as the users see it; changes together with PublishPort when TLS and DNS exist (D-10).
+Environment=WEBUI_URL=http://127.0.0.1:8080
+# Uploads, the vector store (chroma) and caches. Chats, users and settings are in PostgreSQL.
+Volume=/opt/llm-gateway/openwebui/data:/app/backend/data:Z
+# Loopback only, reached through an SSH tunnel, like the LiteLLM admin UI (docs/05 §5.8).
+PublishPort=127.0.0.1:8080:8080
+Network=llmgw-backend.network
+DropCapability=all
+NoNewPrivileges=true
+LogDriver=journald
+# Same probe as the image's own HEALTHCHECK (curl is in the image); /health answers
+# {"status":true} once the app is up.
+HealthCmd=curl -fsS http://127.0.0.1:8080/health
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+# First start runs the database migrations and loads the embedding model.
+HealthStartPeriod=180s
+HealthOnFailure=kill
+Notify=healthy
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+# Budget (D-15, amended 2026-09-17): 2 GiB taken from LiteLLM's former 6 GiB ceiling.
+MemoryMax=2G
+MemorySwapMax=0
+CPUQuota=100%
+
+[Install]
+WantedBy=default.target

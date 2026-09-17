@@ -14,20 +14,23 @@ every security decision. Work is done phase by phase; each phase has a document 
 ```mermaid
 flowchart LR
   subgraph clients["Users (on-prem network)"]
-    ui["Chat UI<br/>Open WebUI / LibreChat<br/>virtual key set by admin"]
+    ui["Browser<br/>users of Open WebUI"]
     dev["Dev tools<br/>OpenCode / Claude Code<br/>virtual key per dev"]
   end
   subgraph host["Gateway host (RHEL 10, rootless Podman)"]
     direction TB
+    owui["Open WebUI :8080<br/>accounts, chats,<br/>one service key"]
     litellm["LiteLLM proxy :4000<br/>1 check virtual key + budget<br/>2 pre_call: Presidio mask<br/>3 route model to provider<br/>4 attach real provider key<br/>5 forward, receive reply<br/>6 post_call: restore tags<br/>7 log to PostgreSQL"]
     presidio["Presidio<br/>analyzer + anonymizer<br/>internal network only"]
     pg["PostgreSQL 18<br/>virtual keys, spend,<br/>guardrail traces"]
     litellm -- HTTP --> presidio
     litellm --> pg
+    owui --> pg
+    owui -- "http://litellm:4000/v1" --> litellm
   end
   fw["Egress firewall<br/>allow api.* from gateway host only"]
   prov["Provider APIs<br/>api.anthropic.com<br/>api.openai.com<br/>Gemini API<br/>(see placeholders only)"]
-  ui -- "base URL http://gateway:4000/v1" --> litellm
+  ui -- "https (D-10)" --> owui
   dev -- "base URL http://gateway:4000/v1" --> litellm
   litellm --> fw --> prov
 ```
@@ -45,10 +48,11 @@ Prompt content at each hop, for the input `"Dennis Yurichev"`:
 
 | Component | Image | Notes |
 |-----------|-------|-------|
-| LiteLLM proxy | `ghcr.io/berriai/litellm-non_root:v1.100.1` | non-root (uid 65534), cosign-signed, 6 GiB / 2 CPUs |
+| LiteLLM proxy | `ghcr.io/berriai/litellm-non_root:v1.100.1` | non-root (uid 65534), cosign-signed, 4 GiB / 2 CPUs (6 GiB until 2026-09-17) |
 | Presidio analyzer | `ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364` | non-root (uid 1001), spaCy `en_core_web_lg`, 3 workers, 5 GiB / 3 CPUs |
 | Presidio anonymizer | `ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364` | non-root (uid 1001), 1 GiB / 1 CPU |
 | PostgreSQL | `docker.io/library/postgres:18.6` | uid 999 (host user `llmgw` via keep-id), data at `/opt/llm-gateway/postgres/data`, 1.5 GiB / 1 CPU |
+| Open WebUI | `ghcr.io/open-webui/open-webui:v0.11.3` | uid 0 in the container (host user `llmgw`), no capabilities, own database in the PostgreSQL container, data at `/opt/llm-gateway/openwebui/data`, 2 GiB / 1 CPU |
 
 Every image is pinned by its `linux/amd64` manifest digest on the `Image=` line of its
 unit; `deploy/opt/bin/images.tsv` maps each pin to the multi-arch index it comes from
@@ -71,6 +75,7 @@ older tutorials still reference the Microsoft registry.
 | 5 | Validation: health, keys, masking end to end (mock model) | `docs/05-validation.md` | 5.1 to 5.6, 5.8, 5.9 pass 2026-09-16; 5.7 and 5.10 wait for the provider (D-19) |
 | 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | **next** |
 | 7 | Provider choice, key, real round trip | `docs/05-validation.md` §5.7 | Gemini chosen 2026-09-16 (D-29); **in progress** |
+| 8 | Open WebUI for the users | `docs/07-openwebui.md`, `deploy/opt/openwebui/` | files ready 2026-09-17 (D-30, D-32); deploy after §5.7 |
 | later | TLS termination, SSO for the admin UI, client onboarding | to be decided after phase 5 | open |
 
 ## Repository layout

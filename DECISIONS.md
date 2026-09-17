@@ -171,6 +171,11 @@ Database and role names are set in the PostgreSQL unit (`Environment=`) and repe
 cannot safely reference environment variables in the health command.
 
 ## D-15 Resource budget as cgroup ceilings
+*Amended 2026-09-17 (D-32): LiteLLM's ceiling is cut from 6 GiB to 4 GiB and the 2 GiB
+go to Open WebUI (`MemoryMax=2G`, `CPUQuota=100%`). The sum stays 13.5 GiB. Basis: the
+expected working set of LiteLLM below (1 to 2 GiB); the measurement of docs/07 §7.7
+confirms or revises it.*
+
 *Amended 2026-09-14: the Cortex XDR agent uses about 1 GiB of the host (docs/01 §1.7),
 so the "about 1.5 GiB for the OS" below is shared with it. The ceilings stay: they are
 maximums, and the expected working set (LiteLLM 1 to 2 GiB, analyzer about 3.5 GiB,
@@ -404,3 +409,26 @@ excludes providers training on inputs removes most free endpoints. Figures from
 OpenRouter's help centre as read on 2026-09-17, to be confirmed on openrouter.ai before
 use. Becomes attractive when the bank pays: one contract and one key for many vendors,
 and a zero-data-retention routing flag. D-29 stands.
+
+## D-32 Open WebUI deployment parameters
+Decided 2026-09-17, all in `deploy/opt/openwebui/llmgw-openwebui.container`. Image
+`v0.11.3` pinned by linux/amd64 digest, no cosign signature published (digest pin like
+Presidio and PostgreSQL). The image runs as uid 0 inside the container by its build
+default; under rootless Podman that is the `llmgw` account with every capability dropped,
+and files in the data directory come out owned by `llmgw`, the same effect keep-id gives
+PostgreSQL. Its relational data goes into a second database (`openwebui`) in the existing
+PostgreSQL container so that one dump procedure covers everything (docs/06 §6.1); the
+vector store stays in the data directory (chroma; pgvector would need an extension the
+stock image lacks). `ENABLE_PERSISTENT_CONFIG=false`: every setting comes from the unit
+and the env file and the admin panel cannot change them across restarts, the same
+principle as `STORE_MODEL_IN_DB=False`. `OFFLINE_MODE=true` on the Internal network.
+One LiteLLM virtual key for the front-end (alias `openwebui`, `gemini-2.5-flash` only,
+monthly budget); per-person accounting through `X-OpenWebUI-User-Id` mapped by LiteLLM's
+`user_header_name` to `end_user`; the opaque id rather than the e-mail because LiteLLM
+also copies the value into the OpenAI `user` field, which some providers accept (Gemini
+does not; `drop_params` removes it). Background generations after each answer: title
+kept, tags, follow-ups and autocomplete off; community sharing, code execution, code
+interpreter, web search, image generation and arena models off. Loopback port 8080
+through an SSH tunnel until D-10 is settled. Local accounts for the pilot, first account
+is the admin, sign-up closed, new accounts pending until activated; LDAP and OIDC settings
+exist in the same unit for the Active Directory step.

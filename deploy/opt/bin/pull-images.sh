@@ -17,7 +17,7 @@ set -euo pipefail
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TABLE="$BIN/images.tsv"
 KEY="$BIN/litellm-cosign.pub"
-UNITS=(/opt/llm-gateway/litellm/*.container /opt/llm-gateway/presidio/*.container /opt/llm-gateway/postgres/*.container)
+UNITS=(/opt/llm-gateway/litellm/*.container /opt/llm-gateway/presidio/*.container /opt/llm-gateway/postgres/*.container /opt/llm-gateway/openwebui/*.container)
 
 for t in podman skopeo python3; do command -v "$t" >/dev/null || { echo "missing tool: $t (docs/03 §3.1)"; exit 1; }; done
 [[ "$(id -un)" == "llmgw" ]] || { echo "run as llmgw: images must land in llmgw's storage"; exit 1; }

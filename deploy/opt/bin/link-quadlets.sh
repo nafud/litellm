@@ -7,7 +7,7 @@ set -euo pipefail
 BASE=/opt/llm-gateway
 DEST="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd"
 mkdir -p "$DEST"
-for f in "$BASE"/network/*.network "$BASE"/postgres/*.container "$BASE"/presidio/*.container "$BASE"/litellm/*.container; do
+for f in "$BASE"/network/*.network "$BASE"/postgres/*.container "$BASE"/presidio/*.container "$BASE"/litellm/*.container "$BASE"/openwebui/*.container; do
   ln -sfn "$f" "$DEST/$(basename "$f")"
 done
 ls -l "$DEST"

@@ -10,12 +10,17 @@ What must be backed up together (a restore needs all three):
 2. `/opt/llm-gateway/litellm/litellm.env` (in particular `LITELLM_SALT_KEY`) and
    `/opt/llm-gateway/postgres/postgres.env`.
 3. This repository (configuration and units).
+4. Since phase 8: the `openwebui` database in the same container (users, chats,
+   settings), `/opt/llm-gateway/openwebui/openwebui.env` and the upload/vector
+   directory `/opt/llm-gateway/openwebui/data`. Note that chats are stored there
+   unmasked (D-30): the dump inherits that sensitivity.
 
 Logical dump, consistent, run as `llmgw`:
 
 ```bash
 llmgw$ mkdir -p -m 700 /opt/llm-gateway/postgres/backups
 llmgw$ podman exec postgres pg_dump -U litellm -d litellm -Fc > /opt/llm-gateway/postgres/backups/litellm-$(date +%F).dump
+llmgw$ podman exec postgres pg_dump -U litellm -d openwebui -Fc > /opt/llm-gateway/postgres/backups/openwebui-$(date +%F).dump   # phase 8
 ```
 
 Scheduling (user timer under `llmgw`), retention and any off-host copy are deferred to a

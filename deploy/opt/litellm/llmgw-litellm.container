@@ -59,9 +59,11 @@ Restart=always
 RestartSec=5
 # Prisma migration at first start can exceed the 90 s systemd default.
 TimeoutStartSec=300
-# Resource budget for LiteLLM: 6 GiB RAM, 2 CPUs (ceilings enforced by cgroup v2 on the
+# Resource budget for LiteLLM: 4 GiB RAM, 2 CPUs (ceilings enforced by cgroup v2 on the
 # service's cgroup, which contains the container because Quadlet uses --cgroups=split).
-MemoryMax=6G
+# Was 6 GiB; 2 GiB moved to Open WebUI on 2026-09-17 (D-15 amendment). Measured working
+# set of LiteLLM stays well under this ceiling (docs/07 §7.7).
+MemoryMax=4G
 MemorySwapMax=0
 CPUQuota=200%
 
