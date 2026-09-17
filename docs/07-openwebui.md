@@ -199,8 +199,8 @@ unit, and the OpenCode client configuration for developers.
 ## Results
 
 2026-09-17, run in the order above, without the Gemini key (§5.7 not yet run, so the
-`openwebui` key lists `mock-echo` only; switched to `gemini-2.5-flash` with `/key/update`
-once the key exists).
+`openwebui` key lists `mock-echo` only; switched to `gemma-4-31b` in docs/05 §5.7a the
+same day, and to `gemini-2.5-flash` with `/key/update` once that key exists).
 
 - §7.1: seven files transferred, CRLF 0, diffs exactly as described. Two comment blocks
   in config.yaml differed because the earlier scope fix had been applied by `sed` on the

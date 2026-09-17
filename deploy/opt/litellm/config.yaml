@@ -17,6 +17,23 @@ model_list:
       model: gemini/gemini-2.5-flash
       api_key: os.environ/GEMINI_API_KEY
 
+  # TESTING PROVIDER until the Gemini key exists (D-31, amended 2026-09-17): OpenRouter's
+  # free endpoint of Google's Gemma 4 31B, served by Google AI Studio (read from
+  # openrouter.ai/api/v1/models/.../endpoints on 2026-09-17). Free tier: 20 requests per
+  # minute, 50 per day for the whole account. Test data only. The id is not in the cost map
+  # shipped with 1.100.1, only in the map LiteLLM downloads at start-up; the price is stated
+  # here (0) so spend accounting does not depend on that download (custom pricing, verified
+  # in 1.100.1 litellm_logging.py use_custom_pricing_for_model). The OpenAI 'user' field
+  # (the Open WebUI user id, see general_settings) is not among the parameters LiteLLM
+  # sends to OpenRouter and drop_params removes it (verified by capturing the outbound
+  # request of 1.100.1: body keys model, messages, usage only).
+  - model_name: gemma-4-31b
+    litellm_params:
+      model: openrouter/google/gemma-4-31b-it:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+
   # VALIDATION ONLY. Never contacts a provider: LiteLLM returns mock_response as-is.
   # Used in docs/05-validation.md to prove that PII is masked before the "model" and
   # restored after it, and kept for the regression checks of docs/06 §6.3 (D-29).
@@ -84,7 +101,9 @@ general_settings:
   # id in this header on every request; LiteLLM stores it as end_user in the spend log
   # (verified in 1.100.1 proxy/litellm_pre_call_utils.py get_user_from_headers). The
   # value is also copied into the OpenAI 'user' field; Gemini does not accept that field
-  # and drop_params removes it, so it never leaves the gateway today.
+  # and drop_params removes it; LiteLLM sends it only to OpenAI's own models, so it is
+  # dropped for OpenRouter too (verified, see the gemma-4-31b entry). It never leaves the
+  # gateway.
   user_header_name: X-OpenWebUI-User-Id
 
 litellm_settings:

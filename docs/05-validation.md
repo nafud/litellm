@@ -196,6 +196,54 @@ name `gemini-2.5-flash` (D-29). Phase 7 consists of:
 4. Optionally narrow the egress rule to the provider's addresses (docs/02 §2.8); the
    endpoint is `generativelanguage.googleapis.com`, TCP 443.
 
+### 5.7a Testing provider: OpenRouter, until the Gemini key exists
+
+Added 2026-09-17 (D-31 amended). The Gemini key had not been obtained; an OpenRouter key
+on a free-tier account (no credits) is used for the demonstration and for tests with
+made-up data. Model entry `gemma-4-31b` in `deploy/opt/litellm/config.yaml`
+(`openrouter/google/gemma-4-31b-it:free`, served by Google AI Studio according to
+OpenRouter's endpoint listing on 2026-09-17; 262k context, 32k output, text and images).
+Account limits: 20 requests per minute and 50 per day across all free models; when
+exhausted LiteLLM returns OpenRouter's 429 to the client. Prompts pass OpenRouter and
+Google; both may keep or train on free-tier inputs. Steps, same shape as 1 to 3 above:
+
+1. Transfer and install the new `config.yaml` (step 1 above). The diff shows the
+   `gemma-4-31b` block and two comment changes only.
+2. Add the key and restart; `/v1/models` must list `gemma-4-31b`:
+
+   ```bash
+   llmgw$ read -rs -p 'OpenRouter key: ' ORK; echo; printf 'OPENROUTER_API_KEY=%s\n' "$ORK" >> /opt/llm-gateway/litellm/litellm.env; unset ORK
+   llmgw$ grep -c '^OPENROUTER_API_KEY=' /opt/llm-gateway/litellm/litellm.env; stat -c '%U %a' /opt/llm-gateway/litellm/litellm.env   # 1, llmgw 600
+   llmgw$ systemctl --user restart llmgw-litellm.service && podman ps --format '{{.Names}}\t{{.Status}}'
+   llmgw$ curl -sS $BASE/v1/models -H "Authorization: Bearer $MASTER_KEY" | python3 -c 'import sys,json; print([m["id"] for m in json.load(sys.stdin)["data"]])'
+   ```
+3. Round trip through the master key first (no virtual key yet), then the spend log row:
+
+   ```bash
+   llmgw$ curl -sS $BASE/v1/chat/completions -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" -d '{"model":"gemma-4-31b","messages":[{"role":"user","content":"Reply with exactly the text between the quotes: \"Hello Dennis Yurichev\""}]}' | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r["model"], "|", r["choices"][0]["message"]["content"].strip())'
+   llmgw$ podman exec postgres psql -U litellm -d litellm -c "select model, model_group, spend, end_user, metadata->'applied_guardrails' as guardrails, metadata->'guardrail_information'->0->'masked_entity_count' as masked, messages::text = '{}' as no_prompt from \"LiteLLM_SpendLogs\" order by \"startTime\" desc limit 2;"
+   ```
+
+   Expected: the reply contains `Hello Dennis Yurichev` (restored on the way back; the
+   provider received `Hello <PERSON_1>`), `spend` is 0 (explicit pricing), `masked`
+   shows `{"PERSON": 1}`, `no_prompt` is `t`.
+4. Point the front-end's key at the model. `/key/update` accepts the alias in 1.100.1
+   (`key_management_endpoints.py`), so the key value is not read out; `mock-echo` leaves
+   the users' key (D-29):
+
+   ```bash
+   llmgw$ curl -sS -X POST $BASE/key/update -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" -d '{"key_alias":"openwebui","models":["gemma-4-31b"]}' | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("models"), d.get("key_alias"))'
+   ```
+
+   Open WebUI reads the model list from LiteLLM on each page load; a browser reload
+   shows `gemma-4-31b` and no longer `mock-echo`. Send the name test from docs/07 §7.6
+   through the browser and confirm the new spend-log row carries the user's `end_user`
+   id and `gemma-4-31b`.
+
+Reverting to Gemini later: steps 2 and 3 above with the Gemini key, then `/key/update`
+with `["gemini-2.5-flash"]`; the `gemma-4-31b` entry and `OPENROUTER_API_KEY` line are
+removed when the account is closed.
+
 Limits to state to users (D-29): the guardrail scans only the text parts of a message
 (verified in 1.100.1 `presidio.py`: list content items without a `text` field are
 skipped), so a file or image attachment reaches the provider unmasked; documents are
