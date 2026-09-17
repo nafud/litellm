@@ -414,20 +414,24 @@ and a zero-data-retention routing flag. D-29 stands.
 Amended 2026-09-17, same day: the Gemini key was not obtained and an OpenRouter key on a
 free-tier account exists, so OpenRouter becomes the testing provider until the Gemini key
 arrives (docs/05 §5.7a). Checked against OpenRouter's API from the server: account
-`is_free_tier: true`, no credit limit, 24 free ids among 444 models. Model chosen:
-`google/gemma-4-31b-it:free`, public name `gemma-4-31b`, because its only endpoint is
-served by Google AI Studio, the backend D-29 already accepts, with tools, JSON output and
-image input (the NVIDIA 120B alternative is text-only on NVIDIA's own hosting; the
-`openrouter/free` alias routes to any free model and was rejected for that). Accepted
-for testing only: two third parties in the data path, free-tier inputs may be used for
-training, 20 requests per minute and 50 per day for the whole account. Verified in
-1.100.1 before configuring: the model id is absent from the shipped cost map and present
-at zero cost in the map fetched at start-up, so the entry states `0` explicitly; the
-OpenAI `user` field carrying the Open WebUI id is not sent to OpenRouter (captured
-outbound request body: model, messages, usage); LiteLLM adds `HTTP-Referer:
-https://litellm.ai` and `X-Title: liteLLM` headers on every OpenRouter call, which only
-identify the software. The users' key lists `gemma-4-31b` alone; `mock-echo` stays out
-(D-29). Removal path in docs/05 §5.7a.
+`is_free_tier: true`, no credit limit, 24 free ids among 444 models. First choice
+`google/gemma-4-31b-it:free` (only endpoint: Google AI Studio, the D-29 backend) was
+installed and passed one round trip, then answered 429 `upstream_provider_shared_pool`
+on most calls, through LiteLLM and directly, streaming or not; the free Google pool is
+shared by all OpenRouter users and saturated most of the time. Replaced the same day by
+`nvidia/nemotron-3-super-120b-a12b:free`, public name `nemotron-3-super`: one host
+(NVIDIA), answered on the first call in every test, clean answer with its reasoning in a
+separate field. Text only. The `openrouter/free` alias routes to any free model and was
+rejected for that. Accepted for testing only: two third parties in the data path
+(OpenRouter, NVIDIA), free-tier inputs may be used for training, 20 requests per minute
+and 50 per day for the whole account. Verified in 1.100.1 before configuring: the model
+id is absent from the shipped cost map, so the entry states `0` explicitly; the OpenAI
+`user` field carrying the Open WebUI id is not sent to OpenRouter (captured outbound
+request body: model, messages, usage); LiteLLM adds `HTTP-Referer: https://litellm.ai`
+and `X-Title: liteLLM` headers on every OpenRouter call, which only identify the
+software; LiteLLM's default retries (two in the OpenAI client, wrapped by the router's)
+stay, they got calls through gaps in a saturated pool. The users' key lists
+`nemotron-3-super` alone; `mock-echo` stays out (D-29). Removal path in docs/05 §5.7a.
 
 ## D-32 Open WebUI deployment parameters
 Decided 2026-09-17, all in `deploy/opt/openwebui/llmgw-openwebui.container`. Image
