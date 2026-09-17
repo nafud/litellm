@@ -220,6 +220,8 @@ once the key exists).
   dennis@example.com`. Spend log: three rows (`test` message, its title generation
   80 ms later, the PII prompt), each with the admin's UUID in `end_user`, `{}` in both
   body columns, key `openwebui` at spend 0.
+- §7.6 check 5: sign out and log in again work, the login form offers no sign-up, chats
+  persist (they live in the `openwebui` database).
 - §7.7 after 20 minutes of use: LiteLLM 906 MB (ceiling 4 GiB), Open WebUI 778 MB
   (2 GiB), analyzer 2.2 GB (5 GiB), anonymizer 56 MB (1 GiB), PostgreSQL 270 MB
   (1.5 GiB); host 5.2 GB used of 15.7 GB, swap 0. The D-15 split holds.
