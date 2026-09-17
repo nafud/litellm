@@ -52,7 +52,7 @@ print(next((m['digest'] for m in d.get('manifests',[]) if m['platform'].get('os'
   fi
   echo "   index lists linux/amd64 = $amd64"
 
-  if ! grep -qh -E "^Image=${repo}:${tag}@${amd64}\$" "${UNITS[@]}"; then
+  if ! grep -qhxF "Image=${repo}:${tag}@${amd64}" "${UNITS[@]}"; then
     echo "   ERROR: no unit pins Image=${repo}:${tag}@${amd64}"; fail=1; continue
   fi
 

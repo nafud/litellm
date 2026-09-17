@@ -44,7 +44,8 @@ Notify=healthy
 Restart=always
 RestartSec=5
 TimeoutStartSec=180
-# Remainder of the 15 GiB host after LiteLLM (6) and Presidio (6), leaving ~1.5 GiB to the OS.
+# Remainder of the 15 GiB host after LiteLLM (4), Open WebUI (2) and Presidio (6), leaving
+# ~1.5 GiB to the OS (D-15, amended 2026-09-17).
 MemoryMax=1500M
 MemorySwapMax=0
 CPUQuota=100%

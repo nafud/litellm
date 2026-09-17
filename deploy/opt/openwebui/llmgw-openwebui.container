@@ -77,8 +77,8 @@ Network=llmgw-backend.network
 DropCapability=all
 NoNewPrivileges=true
 LogDriver=journald
-# Same probe as the image's own HEALTHCHECK (curl is in the image); /health answers
-# {"status":true} once the app is up.
+# Same endpoint as the image's own HEALTHCHECK (curl is in the image; the image's probe
+# also parses the JSON with jq); /health answers 200 {"status":true} once the app is up.
 HealthCmd=curl -fsS http://127.0.0.1:8080/health
 HealthInterval=30s
 HealthTimeout=10s

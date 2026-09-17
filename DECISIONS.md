@@ -95,6 +95,8 @@ instead of logging and continuing.
 ## D-09 Validation-only mock model
 `mock-echo` in `config.yaml` never calls a provider; it is used to prove mask/restore
 without spending tokens or requiring a provider key. It is removed after phase 5.
+*Amended 2026-09-16 (D-29): kept as a test-only entry for docs/05 §5.4 and the docs/06
+§6.3 regression checks; users' keys never list it.*
 
 ## D-10 TLS (open)
 LiteLLM serves plain HTTP on 4000. Virtual keys travel in the `Authorization` header, so

@@ -9,9 +9,10 @@
 # /etc/sysconfig/nftables.conf 'include' and systemctl enable --now nftables.
 #
 # Policy for llmgw: established/related, loopback, DNS to the host resolvers, HTTPS (443)
-# anywhere. Everything else from llmgw is logged and dropped. The provider is chosen
-# after validation (D-19); once known, 'tcp dport 443 accept' can be narrowed to a named
-# set of its addresses, or the network firewall can restrict this host to those FQDNs.
+# anywhere. Everything else from llmgw is logged and dropped. Providers in use:
+# openrouter.ai (testing, D-31) and generativelanguage.googleapis.com (D-29). When this
+# policy is applied (deferred, D-22), 'tcp dport 443 accept' can be narrowed to a named
+# set of their addresses, or the network firewall can restrict this host to those FQDNs.
 
 table inet llmgw_egress {
     set resolvers4 {
