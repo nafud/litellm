@@ -75,7 +75,7 @@ older tutorials still reference the Microsoft registry.
 | 5 | Validation: health, keys, masking end to end (mock model) | `docs/05-validation.md` | 5.1 to 5.6, 5.8, 5.9 pass 2026-09-16; 5.7 and 5.10 wait for the provider (D-19) |
 | 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | **next** |
 | 7 | Provider choice, key, real round trip | `docs/05-validation.md` §5.7 | Gemini chosen 2026-09-16 (D-29); **in progress** |
-| 8 | Open WebUI for the users | `docs/07-openwebui.md`, `deploy/opt/openwebui/` | files ready 2026-09-17 (D-30, D-32); deploy after §5.7 |
+| 8 | Open WebUI for the users | `docs/07-openwebui.md`, `deploy/opt/openwebui/` | deployed 2026-09-17 (D-30, D-32), masking round trip through the browser verified; runs on `mock-echo` until §5.7; exposure (TLS, DNS, firewalld) open |
 | later | TLS termination, SSO for the admin UI, client onboarding | to be decided after phase 5 | open |
 
 ## Repository layout

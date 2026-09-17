@@ -197,4 +197,25 @@ unit, and the OpenCode client configuration for developers.
 
 ## Results
 
-_(to be filled in when the steps above are run)_
+2026-09-17, run in the order above, without the Gemini key (§5.7 not yet run, so the
+`openwebui` key lists `mock-echo` only; switched to `gemini-2.5-flash` with `/key/update`
+once the key exists).
+
+- §7.1: seven files transferred, CRLF 0, diffs exactly as described. Two comment blocks
+  in config.yaml differed because the earlier scope fix had been applied by `sed` on the
+  server without the comments; the `presidio_filter_scope: input` line itself was identical.
+- §7.2: pull OK, 1.8 GB compressed, 5.16 GB on disk; `user=0:0`, `cmd=[bash start.sh]`,
+  port 8080.
+- §7.3, §7.4: role and database created; key alias `openwebui`, 25 characters,
+  `['mock-echo'] 20.0 30d`; env file `llmgw 600`, no placeholder left.
+- §7.5: LiteLLM restarted, `MemoryMax=4294967296`, both models listed. Open WebUI healthy
+  in 30 s at 759 MB, but with the embedding-model error described in §7.5; fixed by the
+  `/data` mount, second start healthy at 763 MB, log shows
+  `Loading SentenceTransformer model from /app/backend/data/cache/embedding/models/...`
+  and no `ERROR`. The application logs in UTC (four hours behind the podman lines).
+- §7.6: onboarding page, admin account created (`admin`). Model selector shows
+  `mock-echo` only. Prompt `My name is Dennis Yurichev, e-mail dennis@example.com.
+  Summarise this.` returned `Mock reply. Restored placeholders: Dennis Yurichev
+  dennis@example.com`. Spend log: three rows (`test` message, its title generation
+  80 ms later, the PII prompt), each with the admin's UUID in `end_user`, `{}` in both
+  body columns, key `openwebui` at spend 0.
