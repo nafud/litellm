@@ -154,7 +154,7 @@ name `gemini-2.5-flash` (D-29). Phase 7 consists of:
    `scp` (docs/03 §3.4), check it and install it as `llmgw`:
 
    ```bash
-   grep -c $'\r' /tmp/config.yaml; diff /opt/llm-gateway/litellm/config.yaml /tmp/config.yaml
+   grep -c $'\r' /tmp/config.yaml; sudo diff /opt/llm-gateway/litellm/config.yaml /tmp/config.yaml
    sudo install -m 644 -o llmgw -g llmgw /tmp/config.yaml /opt/llm-gateway/litellm/config.yaml && rm /tmp/config.yaml
    ```
 

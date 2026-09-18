@@ -25,7 +25,7 @@ On the server, CRLF check and diff of the five files that already exist:
 
 ```bash
 infosec$ cd /tmp && grep -c $'\r' llmgw-openwebui.container openwebui.env.example images.tsv pull-images.sh link-quadlets.sh config.yaml llmgw-litellm.container   # every line ends in :0
-infosec$ for f in bin/images.tsv bin/pull-images.sh bin/link-quadlets.sh litellm/config.yaml litellm/llmgw-litellm.container; do echo "== $f"; diff /opt/llm-gateway/$f /tmp/$(basename $f); done
+infosec$ for f in bin/images.tsv bin/pull-images.sh bin/link-quadlets.sh litellm/config.yaml litellm/llmgw-litellm.container; do echo "== $f"; sudo diff /opt/llm-gateway/$f /tmp/$(basename $f); done
 ```
 
 Expected: `images.tsv` one comment line changed and one `openwebui` row added;

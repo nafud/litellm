@@ -214,7 +214,7 @@ inheritance, the auth cookie). Transfer the file with the branch ZIP and `scp`
 (docs/03 §3.4) and check it on the server:
 
 ```bash
-infosec$ grep -c $'\r' /tmp/llmgw-openwebui.container; diff /opt/llm-gateway/openwebui/llmgw-openwebui.container /tmp/llmgw-openwebui.container
+infosec$ grep -c $'\r' /tmp/llmgw-openwebui.container; sudo diff /opt/llm-gateway/openwebui/llmgw-openwebui.container /tmp/llmgw-openwebui.container
 infosec$ sudo install -m 644 -o llmgw -g llmgw /tmp/llmgw-openwebui.container /opt/llm-gateway/openwebui/llmgw-openwebui.container && rm /tmp/llmgw-openwebui.container
 ```
 
