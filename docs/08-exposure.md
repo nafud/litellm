@@ -524,5 +524,50 @@ from the host is logged as `203.0.113.9:0 - "GET /api/version HTTP/1.1" 200`. Af
 restart the container came up as `10.89.0.18`, no longer `.16`, which confirms that the
 subnet, not a single address, was the right value to trust.
 
-Still to run: DNS A record for `aiproxy.xalqbank.az`, then §8.4 in the browser; §8.1
-steps 13 to 19 for LiteLLM and its A record.
+**2026-09-18, the browser's "500": a whole-day log export, read without time windows.**
+The export (every Open WebUI access line of the day trimmed to time, client, request and
+status; every other line; the WebSocket count; LiteLLM's non-loopback lines; the unit
+that exited at 16:13:11; firewalld's log-denied state; the rsyslog target) shows:
+
+- 428 requests reached Open WebUI today, all `GET`, all `200` or `304`, from the
+  container's own addresses (`10.89.0.16`, then `10.89.0.18`) plus the one forged-header
+  proof. No `POST`, no `4xx`, no `5xx`. A browser loaded the page 37 times between
+  15:26 and 16:41, in bursts (seven loads within five seconds at 16:24), and every load
+  ends with the same four served requests: `/`, `/manifest.json`, `/api/config`,
+  `/api/version`. 132 `/_app/version.json` polls in between: the page stays open and
+  its client-side code keeps running.
+- WebSocket handshakes received today: 0. In v0.11.3 the client opens its socket.io
+  WebSocket at `/ws/socket.io/` right after `/api/config`, unconditionally and with the
+  `websocket` transport only (`+layout.svelte` line 1263, `socket/main.py` line 94;
+  `ENABLE_WEBSOCKET_SUPPORT` defaults to true and the unit does not set it). uvicorn
+  0.51.0 logs every WebSocket handshake it receives, accepted or refused, on
+  `uvicorn.error` (all three implementations in the wheel), and Open WebUI routes that
+  logger to stdout. So 37 handshakes were sent and none reached the container: they
+  are answered in front of the server, i.e. by the WAF, the only device there. Whether
+  the login `POST` was also attempted cannot be read from the server (no `POST`
+  arrived); the browser's Network tab or the WAF attack log tells which request carries
+  the visible 500.
+- Not related: the unit that exited at 16:13:11 is the new container's first health
+  check, run 0.1 s after `container start` and before uvicorn listened (`unhealthy`,
+  then healthy from 16:13:42; the unit's `HealthStartPeriod=180s` covers it). firewalld
+  `log-denied` is still `unicast` from the §8.3 test and logged no drop all day, so
+  the WAF's packets are all accepted; it is switched off again. `rsyslog` forwards
+  `*.* @@linux-mon.xalqbank.az` (TCP 514) and times out every four minutes: a network
+  path item for the monitoring team, outside this project. LiteLLM's two non-loopback
+  lines are host-side curls through its published port (container-side addresses,
+  the rootlessport effect); the WAF has no LiteLLM policy yet.
+
+What the FortiWeb 7.6.7 guide says about WebSocket (page 754, 761 to 763): FortiWeb
+passes WebSocket "as a pure socket proxy" unless told otherwise, and three settings
+turn a handshake into a violation answered with the block page: the **WebSocket
+Protocol** item of the HTTP Protocol Constraints object attached to `wpp-openwebui`
+(Web Protection > Protocol > HTTP; CLI exception field `web-socket-protocol-check`),
+a **WebSocket security policy** on the profile with Block WebSocket Traffic or with
+extensions blocked (the browser sends `Sec-WebSocket-Extensions: permessage-deflate`,
+and the unit runs uvicorn with `--ws-per-message-deflate true`), and a **URL access**
+rule on that policy that does not include `/ws/`. The attack log names the one that
+fired: `HTTP Protocol Constraints`, `WebSocket Traffic not Allowed`, `WebSocket
+Extensions not Allowed` or `URL Access`. To be read on the WAF when that work resumes.
+
+Still to run: the WebSocket item above, then DNS A record for `aiproxy.xalqbank.az`
+and §8.4 in the browser; §8.1 steps 13 to 19 for LiteLLM and its A record.
