@@ -475,7 +475,8 @@ stays on the SSH tunnel.
 The WAF-to-server leg is unencrypted by choice (option 1 of two considered). It is
 confined by firewalld to the WAF's address `10.50.4.100`, so the only path to the
 container runs through the WAF and the forwarded client address cannot be forged
-(`FORWARDED_ALLOW_IPS` in the unit; uvicorn's default trusts everyone). Option 2, TLS on
+(`FORWARDED_ALLOW_IPS` in the unit; uvicorn's default trusts everyone; corrected
+2026-09-18, amendment 4: the value is the backend subnet, not the WAF address). Option 2, TLS on
 that leg too, was verified possible: LiteLLM 1.100.1 terminates TLS itself
 (`--ssl_certfile_path`, `--ssl_keyfile_path`), Open WebUI v0.11.3 cannot (its start
 script passes no TLS option to uvicorn) and would need a terminator on the server. Kept
@@ -519,3 +520,14 @@ the path between the WAF and 10.50.4.68 passes 443, 8080 and 8443 and drops 3000
 The port carries plain HTTP (pool member SSL off), like 8080; the container port and the
 loopback publish stay 4000, so docs/05 §5.8 is unchanged. Rejected: asking the network
 team to permit 4000 (a change request for a port choice that has no other reason).
+
+Amended 2026-09-18 (4): `FORWARDED_ALLOW_IPS` is `10.89.0.0/24`, the `llmgw-backend`
+subnet, not the WAF address. Rootless Podman publishes a port through `rootlessport`,
+which opens a new connection inside the container network from the container's own
+address (verified: every access line named `10.89.0.16`, the Open WebUI container's IP),
+so a value naming the WAF never matched and the header was ignored. The subnet is pinned
+in `llmgw-backend.network` so the value stays true across a recreation. Trusting the
+whole backend network is equivalent in effect: the only way onto port 8080 from outside
+the host is firewalld's WAF rule, and the other members of that network are this
+deployment's own containers. Open WebUI v0.11.3 cannot see the real peer; the same holds
+for LiteLLM, whose `use_x_forwarded_for` takes the header verbatim anyway.

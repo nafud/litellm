@@ -29,7 +29,7 @@ flowchart LR
   subgraph host["Gateway host xbbovsrlllm001 (10.50.4.68)"]
     fw["firewalld<br/>ports 8080 and 8443 accepted from 10.50.4.100 only<br/>SSH kept open until the admin ranges are known"]
     subgraph podman["rootless Podman, user llmgw"]
-      owui["Open WebUI :8080 (published on 10.50.4.68)<br/>WEBUI_URL=https://aiproxy.xalqbank.az<br/>FORWARDED_ALLOW_IPS=10.50.4.100"]
+      owui["Open WebUI :8080 (published on 10.50.4.68)<br/>WEBUI_URL=https://aiproxy.xalqbank.az<br/>FORWARDED_ALLOW_IPS=10.89.0.0/24 (rootlessport peer)"]
       litellm["LiteLLM :4000 (loopback; 10.50.4.68:8443 for the WAF)<br/>virtual key per developer<br/>use_x_forwarded_for"]
       presidio["Presidio<br/>masks PII"]
       pg["PostgreSQL"]
@@ -282,7 +282,9 @@ units and DECISIONS.md cite them.
 
 Open WebUI first. Three lines changed in `deploy/opt/openwebui/llmgw-openwebui.container`:
 `PublishPort=10.50.4.68:8080:8080`, `WEBUI_URL=https://aiproxy.xalqbank.az`, and two
-new variables `FORWARDED_ALLOW_IPS=10.50.4.100` and `WEBUI_SESSION_COOKIE_SECURE=true`
+new variables `FORWARDED_ALLOW_IPS=10.89.0.0/24` (see the Results entry of 2026-09-18 on
+rootlessport: the first version named the WAF address and never matched) and
+`WEBUI_SESSION_COOKIE_SECURE=true`
 (both read by v0.11.3: `start.sh` passes the first to uvicorn as `--forwarded-allow-ips`,
 whose default is `*`; `env.py` applies the second to the session cookie and, by
 inheritance, the auth cookie). Transfer the file with the branch ZIP and `scp`
@@ -402,7 +404,10 @@ are corrected to that address, not the other way round.
    ```
 
    uvicorn's access lines show the client address from `X-Forwarded-For` (the
-   workstation's address), not 10.50.4.100, which proves `FORWARDED_ALLOW_IPS` works.
+   workstation's address), not 10.89.0.16 (the container's own address, which is what
+   rootlessport connects from), which proves `FORWARDED_ALLOW_IPS` works. `/health`
+   requests are not in this log (Open WebUI does not log them), so use `/api/version`
+   or `/` for this check.
 5. Sign out and in again: the cookie is accepted (Secure flag, HTTPS).
 
 LiteLLM round trip (workstation, then server). The virtual key goes into a header file
@@ -492,5 +497,25 @@ rule of step 5 working, which is what was first taken for a fault. Open point: t
 response carries no `strict-transport-security` header, so Add HSTS Header of step 10
 is not in effect yet.
 
-Still to run: DNS A record for `aiproxy.xalqbank.az`, then §8.4 in the browser; §8.1
-steps 13 to 19 for LiteLLM and its A record.
+**2026-09-18, server logs after the WAF tests: two findings, one fix.** (1) Every uvicorn
+access line names the client as `10.89.0.16`, which `podman inspect` shows to be the Open
+WebUI container's own address on `llmgw-backend` (`10.89.0.0/24`, gateway `10.89.0.1`).
+That is how rootless Podman publishes a port: the `rootlessport` helper accepts the
+connection on the host and opens a new one inside the container network, so the peer is
+never the WAF. `FORWARDED_ALLOW_IPS=10.50.4.100` therefore never matched and the
+`X-Forwarded-For` header was ignored. Fixed: the variable names the backend subnet
+(uvicorn 0.51.0, pinned by v0.11.3, accepts a network there), the subnet is pinned in
+`llmgw-backend.network` (`Subnet=`, `Gateway=`; Quadlet's `network create --ignore`
+leaves the existing network as it is), and the guarantee that only the WAF reaches the
+port stays with firewalld, where it always was. Server-only proof after the unit is
+reinstalled: a request from the host with a made-up `X-Forwarded-For` shows that
+address in the access line. (2) Four `Invalid HTTP request received.` lines at 15:24:37
+to 15:25:37 local: a TLS handshake arriving on the plain-HTTP port, i.e. the WAF (member
+SSL or an HTTPS health check) for one minute during its configuration; nothing since.
+Also noted: `/health` requests never appear in the access log (my own curls through the
+WAF at 15:37 and 15:41 are absent while `GET /` at 15:39 is present), so the log cannot
+show the WAF's health checks; §8.4 step 4 uses another path.
+
+Still to run: the Open WebUI unit and network file reinstall (§8.2, this fix); DNS A
+record for `aiproxy.xalqbank.az`, then §8.4 in the browser; §8.1 steps 13 to 19 for
+LiteLLM and its A record.

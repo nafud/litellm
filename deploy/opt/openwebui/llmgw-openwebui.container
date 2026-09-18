@@ -65,9 +65,15 @@ Environment=ENABLE_FOLLOW_UP_GENERATION=false
 Environment=ENABLE_AUTOCOMPLETE_GENERATION=false
 # Address as the users see it (D-33): the WAF holds the certificate for this name.
 Environment=WEBUI_URL=https://aiproxy.xalqbank.az
-# Trust X-Forwarded-For and X-Forwarded-Proto only from the WAF (uvicorn's
-# --forwarded-allow-ips, read from this variable in v0.11.3 start.sh; its default is '*').
-Environment=FORWARDED_ALLOW_IPS=10.50.4.100
+# Trust X-Forwarded-For and X-Forwarded-Proto (uvicorn's --forwarded-allow-ips, read from
+# this variable in v0.11.3 start.sh; its default is '*'). The peer uvicorn sees is never
+# the WAF: rootless Podman's port forwarder (rootlessport) accepts the connection on the
+# host and opens a new one inside the container network, from this container's own
+# address (verified 2026-09-18: every access line names 10.89.0.16, the container's IP).
+# So the trusted range is the backend network, pinned in llmgw-backend.network, and the
+# rule that only the WAF reaches port 8080 is firewalld's (docs/08 §8.3). The first
+# version of this line named the WAF address and never matched.
+Environment=FORWARDED_ALLOW_IPS=10.89.0.0/24
 # The users reach the site over HTTPS, so the session and auth cookies carry the Secure
 # flag (v0.11.3 env.py: the auth cookie setting inherits this one).
 Environment=WEBUI_SESSION_COOKIE_SECURE=true

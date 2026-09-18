@@ -2,6 +2,12 @@
 # Internal=true: no default route and no masquerading, so PostgreSQL and Presidio can
 # never reach anything outside the host. Container names (postgres, presidio-analyzer,
 # presidio-anonymizer) resolve through aardvark-dns; nothing else is resolvable here.
+# Subnet pinned to the value Podman assigned at first creation (podman network inspect,
+# 2026-09-18): Open WebUI's FORWARDED_ALLOW_IPS names this range, so it must not change
+# if the network is ever recreated. `podman network create --ignore` (what Quadlet runs)
+# leaves the existing network untouched.
 [Network]
 NetworkName=llmgw-backend
 Internal=true
+Subnet=10.89.0.0/24
+Gateway=10.89.0.1
