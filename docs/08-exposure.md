@@ -27,10 +27,10 @@ flowchart LR
     vip --> rules
   end
   subgraph host["Gateway host xbbovsrlllm001 (10.50.4.68)"]
-    fw["firewalld<br/>ports 8080 and 4000 accepted from 10.50.4.100 only<br/>SSH kept open until the admin ranges are known"]
+    fw["firewalld<br/>ports 8080 and 8443 accepted from 10.50.4.100 only<br/>SSH kept open until the admin ranges are known"]
     subgraph podman["rootless Podman, user llmgw"]
       owui["Open WebUI :8080 (published on 10.50.4.68)<br/>WEBUI_URL=https://aiproxy.xalqbank.az<br/>FORWARDED_ALLOW_IPS=10.50.4.100"]
-      litellm["LiteLLM :4000 (loopback + 10.50.4.68)<br/>virtual key per developer<br/>use_x_forwarded_for"]
+      litellm["LiteLLM :4000 (loopback; 10.50.4.68:8443 for the WAF)<br/>virtual key per developer<br/>use_x_forwarded_for"]
       presidio["Presidio<br/>masks PII"]
       pg["PostgreSQL"]
       owui -- "http://litellm:4000/v1<br/>internal network" --> litellm
@@ -45,7 +45,7 @@ flowchart LR
   browser -. "1 name lookup" .-> dns
   browser == "2 HTTPS" ==> vip
   dev == "2 HTTPS" ==> vip
-  rules == "3 HTTP to 10.50.4.68:8080 / :4000" ==> fw
+  rules == "3 HTTP to 10.50.4.68:8080 / :8443" ==> fw
   litellm == "4 HTTPS, masked prompt" ==> provider
 ```
 
@@ -223,8 +223,10 @@ health check uses it too.
 
 **Step 15, server pool.** Server Objects > Server > Server Pool > Create New > Create
 HTTP Server Pool `pool-litellm`, Server Balance, Server Health Check `hc-litellm`, Round
-Robin, no persistence; member IP `10.50.4.68`, Port `4000`, SSL off, HTTP/2 off, Inherit
-Health Check on.
+Robin, no persistence; member IP `10.50.4.68`, Port `8443`, SSL off, HTTP/2 off, Inherit
+Health Check on. Port 8443 carries plain HTTP here (SSL off is what makes that so): the
+path between the FortiWeb and the server passes 443, 8080 and 8443 only (Results), and
+of the two free ones 8443 needs no privileged-port change on the host.
 
 **Step 16, protected hostname.** Server Objects > Protected Hostnames > Create New
 `ph-litellm`, Default Action Deny; entry Host `litellm.xalqbank.az`, Action Accept.
@@ -265,7 +267,7 @@ added once the exceptions learned on `sp-openwebui` are known.
 **Monitor Mode off**: the guide states that Monitor Mode ignores the URL access actions,
 so with it on the allowlist would not be enforced and `/ui/` would be reachable. Then the
 same CLI lines as step 11 for `sp-litellm` (`set chunk-encoding enable`), and
-`execute telnettest 10.50.4.68:4000` after §8.3.
+`execute telnettest 10.50.4.68:8443` after §8.3.
 
 **DNS.** Two A records, `aiproxy.xalqbank.az` to the virtual IP of step 1 and
 `litellm.xalqbank.az` to the one of step 13, in the internal zone only, created after
@@ -307,9 +309,11 @@ on 127.0.0.1. The SSH tunnel to 8080 stops working at this point; the LiteLLM tu
 4000 is unaffected.
 
 Then LiteLLM: two files. `deploy/opt/litellm/llmgw-litellm.container` gains a second
-`PublishPort=10.50.4.68:4000:4000` line next to the loopback one (Quadlet accepts the
+`PublishPort=10.50.4.68:8443:4000` line next to the loopback one (Quadlet accepts the
 key several times; the dry-run renders `--publish 127.0.0.1:4000:4000 --publish
-10.50.4.68:4000:4000`), so the admin tunnel of docs/05 §5.8 keeps working unchanged.
+10.50.4.68:8443:4000`), so the admin tunnel of docs/05 §5.8 keeps working unchanged.
+The host port is 8443 and not 4000 because the path from the WAF passes 443, 8080 and
+8443 only (Results); the first run of this section used 4000 and was corrected.
 `deploy/opt/litellm/config.yaml` gains `use_x_forwarded_for: true` under
 `general_settings`: the client address stored with each request (`requester_ip_address`
 in `LiteLLM_SpendLogs`, docs/06 §6.7) becomes the `X-Forwarded-For` value, which the WAF
@@ -333,7 +337,7 @@ llmgw$ podman port litellm
 
 Restarting LiteLLM restarts Open WebUI's upstream only; Open WebUI itself stays up. All
 five healthy; `podman port litellm` prints two lines, `4000/tcp -> 127.0.0.1:4000` and
-`4000/tcp -> 10.50.4.68:4000`; `sudo ss -tlnp | grep ':4000 '` shows both sockets.
+`4000/tcp -> 10.50.4.68:8443`; `sudo ss -tlnp | grep -E ':(4000|8443) '` shows both sockets.
 
 ## 8.3 firewalld (admin account, before §8.2)
 
@@ -344,7 +348,7 @@ ssh`), which confirms the SSH session survives the start. The admin ranges for S
 unknown (docs/01 §1.14 question 5), so the `ssh` service stays allowed from anywhere,
 which is what the host does today without a firewall; the SSH rich rules of §2.7 follow
 when the ranges are known. The Zabbix rule from §2.7 is included so that monitoring
-keeps working. Ports 8080 and 4000 are accepted from the WAF only.
+keeps working. Ports 8080 and 8443 are accepted from the WAF only.
 
 ```bash
 sudo systemctl enable --now firewalld
@@ -353,7 +357,7 @@ sudo firewall-cmd --permanent --zone=public --remove-service=cockpit
 sudo firewall-cmd --permanent --zone=public --remove-service=dhcpv6-client
 sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.100.7.150/32" port port="10050" protocol="tcp" accept'
 sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.50.4.100/32" port port="8080" protocol="tcp" accept'
-sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.50.4.100/32" port port="4000" protocol="tcp" accept'
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.50.4.100/32" port port="8443" protocol="tcp" accept'
 sudo firewall-cmd --reload && sudo firewall-cmd --list-all
 ```
 
@@ -364,7 +368,7 @@ rule is from the workstation:
 
 ```
 curl.exe -sS -m 5 http://10.50.4.68:8080/health
-curl.exe -sS -m 5 http://10.50.4.68:4000/health/liveliness
+curl.exe -sS -m 5 http://10.50.4.68:8443/health/liveliness
 ```
 
 both must fail (the `public` zone rejects with "No route to host" or times out), while the
@@ -376,7 +380,7 @@ read the kernel log, then switch the log off again:
 
 ```bash
 sudo firewall-cmd --set-log-denied=unicast
-sudo journalctl -k --since -1m -g 'DPT=(8080|4000)' | tail -3
+sudo journalctl -k --since -1m -g 'DPT=(8080|8443)' | tail -3
 sudo firewall-cmd --set-log-denied=off
 ```
 
@@ -465,8 +469,13 @@ rule out the port number, a runtime-only rich rule for 8000 and a throwaway list
 out the same way; rule and listener removed, the three permanent rules confirmed. So a
 device on the path between the FortiWeb and the server permits 8080 only; the server
 side is not involved (a firewalld rejection would need a different source address, and
-8080 proves the address). Port 4000 stays; the network team is asked to permit TCP 4000
-from the FortiWeb's server-side address to 10.50.4.68. The Open WebUI objects (§8.1
-steps 1 to 12) do not depend on it and proceed meanwhile.
+8080 proves the address). Six more ports were tried the same way (runtime rules,
+throwaway listeners, `sleep 2` before `ss`, cleanup verified): 443 and 8443 connect;
+3000, 8081, 8888 and 9000 time out. So the path passes 443, 8080 and 8443, the shape of
+a standing web-ports rule, not one opened for Open WebUI alone. Decision (D-33
+amendment 3): LiteLLM is published on host port 8443, container port unchanged, loopback
+line unchanged; 443 would have needed a privileged-port sysctl for rootless Podman. The
+unit, the §8.3 rule (8443 in place of 4000) and step 15 (member port 8443) were
+corrected; the unit is reinstalled and the rule swapped as recorded below.
 
 Still to run: §8.1 (WAF steps 1 to 19, DNS) and §8.4.

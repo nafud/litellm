@@ -111,8 +111,8 @@ general_settings:
   # Behind the WAF (docs/08): the client address recorded with each request
   # (requester_ip_address in the request metadata) is the X-Forwarded-For header, used
   # verbatim (verified in 1.100.1 proxy/litellm_pre_call_utils.py). The WAF writes that
-  # header itself, one address, previous ones deleted, and only the WAF can reach port
-  # 4000 from outside the host (firewalld, docs/08 §8.3). Requests without the header
+  # header itself, one address, previous ones deleted, and only the WAF can reach the
+  # published port from outside the host (firewalld, docs/08 §8.3). Requests without the header
   # (Open WebUI on the internal network, the admin tunnel) keep the peer address.
   use_x_forwarded_for: true
 

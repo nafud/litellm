@@ -510,3 +510,12 @@ access enforcement, and without a signature set at first. The LiteLLM unit keeps
 loopback publish for the admin tunnel and adds the host address; `use_x_forwarded_for:
 true` records the developer's address per request. One certificate with both names as
 SANs serves both server policies.
+
+Amended 2026-09-18 (3): the host port for the WAF leg to LiteLLM is 8443, not 4000.
+Tested from the FortiWeb CLI with `execute telnettest` against listeners on the server:
+the path between the WAF and 10.50.4.68 passes 443, 8080 and 8443 and drops 3000, 4000,
+8000, 8081, 8888 and 9000 (docs/08 Results), the shape of a standing web-ports rule.
+8443 over 443 because a rootless publish on 443 would need the unprivileged-port sysctl.
+The port carries plain HTTP (pool member SSL off), like 8080; the container port and the
+loopback publish stay 4000, so docs/05 §5.8 is unchanged. Rejected: asking the network
+team to permit 4000 (a change request for a port choice that has no other reason).
