@@ -1,6 +1,6 @@
 # Open WebUI: the users' chat front-end (D-30). Its only model source is LiteLLM on the
 # internal network; nothing here reaches the Internet. Reached by the users through the
-# FortiWeb WAF at https://openwebui.xalqbank.az (D-33, docs/08).
+# FortiWeb WAF at https://aiproxy.xalqbank.az (D-33, docs/08).
 [Unit]
 Description=LLM gateway: Open WebUI
 # Its relational data lives in the PostgreSQL container (DATABASE_URL in the env file).
@@ -64,7 +64,7 @@ Environment=ENABLE_TAGS_GENERATION=false
 Environment=ENABLE_FOLLOW_UP_GENERATION=false
 Environment=ENABLE_AUTOCOMPLETE_GENERATION=false
 # Address as the users see it (D-33): the WAF holds the certificate for this name.
-Environment=WEBUI_URL=https://openwebui.xalqbank.az
+Environment=WEBUI_URL=https://aiproxy.xalqbank.az
 # Trust X-Forwarded-For and X-Forwarded-Proto only from the WAF (uvicorn's
 # --forwarded-allow-ips, read from this variable in v0.11.3 start.sh; its default is '*').
 Environment=FORWARDED_ALLOW_IPS=10.50.4.100

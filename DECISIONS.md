@@ -463,7 +463,7 @@ is the admin, sign-up closed, new accounts pending until activated; LDAP and OID
 exist in the same unit for the Active Directory step.
 
 ## D-33 Exposure through the FortiWeb WAF; plain HTTP on the WAF-to-server leg
-Decided 2026-09-17. The users reach Open WebUI as `https://openwebui.xalqbank.az`
+Decided 2026-09-17. The users reach Open WebUI as `https://aiproxy.xalqbank.az`
 through the bank's FortiWeb WAF, which holds the certificate (issued by the WAF's CA,
 trusted on the workstations), terminates TLS and forwards to `10.50.4.68:8080` over
 plain HTTP. No reverse proxy is added on the server: the WAF already is one, and a

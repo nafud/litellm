@@ -1,7 +1,7 @@
-# Phase 9: Exposure through the WAF, openwebui.xalqbank.az and litellm.xalqbank.az
+# Phase 9: Exposure through the WAF, aiproxy.xalqbank.az and litellm.xalqbank.az
 
 Until now both front-ends were reached through SSH tunnels. This phase puts them behind
-the bank's FortiWeb WAF: Open WebUI as `openwebui.xalqbank.az` for the users, LiteLLM as
+the bank's FortiWeb WAF: Open WebUI as `aiproxy.xalqbank.az` for the users, LiteLLM as
 `litellm.xalqbank.az` for developer tools with a virtual key each (D-33; the LiteLLM
 name was added on request on 2026-09-18, docs/05 §5.10). The WAF is the reverse proxy:
 it holds the certificate, terminates the TLS and forwards to the server over plain HTTP
@@ -17,7 +17,7 @@ reach). §8.3 checks this on the server.
 ```mermaid
 flowchart LR
   subgraph user["User workstation (bank network)"]
-    browser["Browser<br/>https://openwebui.xalqbank.az"]
+    browser["Browser<br/>https://aiproxy.xalqbank.az"]
     dev["Developer tool<br/>https://litellm.xalqbank.az/v1<br/>virtual key"]
   end
   dns["Internal DNS<br/>one A record per name -> its WAF VIP<br/>(internal zone only)"]
@@ -29,7 +29,7 @@ flowchart LR
   subgraph host["Gateway host xbbovsrlllm001 (10.50.4.68)"]
     fw["firewalld<br/>ports 8080 and 4000 accepted from 10.50.4.100 only<br/>SSH kept open until the admin ranges are known"]
     subgraph podman["rootless Podman, user llmgw"]
-      owui["Open WebUI :8080 (published on 10.50.4.68)<br/>WEBUI_URL=https://openwebui.xalqbank.az<br/>FORWARDED_ALLOW_IPS=10.50.4.100"]
+      owui["Open WebUI :8080 (published on 10.50.4.68)<br/>WEBUI_URL=https://aiproxy.xalqbank.az<br/>FORWARDED_ALLOW_IPS=10.50.4.100"]
       litellm["LiteLLM :4000 (loopback + 10.50.4.68)<br/>virtual key per developer<br/>use_x_forwarded_for"]
       presidio["Presidio<br/>masks PII"]
       pg["PostgreSQL"]
@@ -71,7 +71,7 @@ answers forwarded chunk by chunk, 20 MB request bodies, no request-body logging.
 
 - A free address on the FortiWeb's client-facing subnet for the virtual IP (it must not
   be an interface address). The DNS A record points at it later.
-- The bank CA signs a server certificate for `openwebui.xalqbank.az` from a CSR (step 7).
+- The bank CA signs a server certificate for `aiproxy.xalqbank.az` from a CSR (step 7).
 - Confirmation that the FortiWeb runs in Reverse Proxy mode (System > Config >
   Operation). It does if it already publishes other applications this way. Never change
   the mode for this project: switching deletes the policies of the old mode.
@@ -103,7 +103,7 @@ Health Check on, Backup Server off, OK. The member shows down until §8.3 is don
 server; that is expected.
 
 **Step 5, protected hostname.** Server Objects > Protected Hostnames > Create New: Name
-`ph-openwebui`, Default Action Deny, OK; Create New entry: Host `openwebui.xalqbank.az`,
+`ph-openwebui`, Default Action Deny, OK; Create New entry: Host `aiproxy.xalqbank.az`,
 Ignore Port off, Override Headers off, Action Accept, OK. Requests whose `Host` is not
 this name are rejected before reaching the server (the attack log then shows
 `HTTP Host Violation`).
@@ -118,9 +118,9 @@ WAF directly, nothing applies NAT in front of it), OK. The rule takes effect onl
 selected in the protection profile (step 9).
 
 **Step 7, certificate.** Server Objects > Certificates > Local > Generate: Certification
-Name `openwebui.xalqbank.az`, ID Type Domain Name, Domain Name `openwebui.xalqbank.az`,
+Name `aiproxy.xalqbank.az`, ID Type Domain Name, Domain Name `aiproxy.xalqbank.az`,
 Organization and Country as the bank's PKI requires, Subject Alternative Names
-`openwebui.xalqbank.az` and `litellm.xalqbank.az` (one certificate serves both server
+`aiproxy.xalqbank.az` and `litellm.xalqbank.az` (one certificate serves both server
 policies and is renewed once), Key Type RSA, Key Size 2048 Bit, Digest Algorithm SHA256,
 Enrollment Method File Based, OK. Select the PENDING row, Download, and submit the
 `.csr` to the bank CA (server authentication). The private key stays on the WAF. When
@@ -158,7 +158,7 @@ Protection empty for now. Everything else as cloned.
   WAF's address, §8.3 depends on it); HTTP Service `HTTP` only if the redirect below is
   wanted; HTTPS Service `HTTPS`; HTTP/2 **off** (default; HTTP/2 bypasses the WebSocket
   services and is the setting behind the reported hangs of `text/event-stream`
-  responses); Certificate Type Local, Certificate `openwebui.xalqbank.az`, Certificate
+  responses); Certificate Type Local, Certificate `aiproxy.xalqbank.az`, Certificate
   Intermediate Group `ca-group-bank` if created.
 - Advanced SSL settings: Supported SSL Protocols TLS 1.2 and TLS 1.3 only; SSL/TLS
   Encryption Level High; Disable Client-Initiated SSL Renegotiation on; Add HSTS Header
@@ -267,14 +267,14 @@ so with it on the allowlist would not be enforced and `/ui/` would be reachable.
 same CLI lines as step 11 for `sp-litellm` (`set chunk-encoding enable`), and
 `execute telnettest 10.50.4.68:4000` after §8.3.
 
-**DNS.** Two A records, `openwebui.xalqbank.az` to the virtual IP of step 1 and
+**DNS.** Two A records, `aiproxy.xalqbank.az` to the virtual IP of step 1 and
 `litellm.xalqbank.az` to the one of step 13, in the internal zone only, created after
 step 12 passes. The server's own address is not published under these names.
 
 ## 8.2 The units (workstation, then service account)
 
 Open WebUI first. Three lines changed in `deploy/opt/openwebui/llmgw-openwebui.container`:
-`PublishPort=10.50.4.68:8080:8080`, `WEBUI_URL=https://openwebui.xalqbank.az`, and two
+`PublishPort=10.50.4.68:8080:8080`, `WEBUI_URL=https://aiproxy.xalqbank.az`, and two
 new variables `FORWARDED_ALLOW_IPS=10.50.4.100` and `WEBUI_SESSION_COOKIE_SECURE=true`
 (both read by v0.11.3: `start.sh` passes the first to uvicorn as `--forwarded-allow-ips`,
 whose default is `*`; `env.py` applies the second to the session cookie and, by
@@ -378,11 +378,11 @@ are corrected to that address, not the other way round.
 
 ## 8.4 Round trip (workstation, browser)
 
-1. `https://openwebui.xalqbank.az/` shows the login page with a valid certificate (the
+1. `https://aiproxy.xalqbank.az/` shows the login page with a valid certificate (the
    padlock names the WAF's CA), no warning.
 2. Log in as the admin, send the docs/07 §7.6 name test; the answer streams token by
    token (`chunk-encoding enable`, §8.1 step 11) and the placeholders come back restored.
-3. Admin Panel, Settings, General shows the WebUI URL as `https://openwebui.xalqbank.az`.
+3. Admin Panel, Settings, General shows the WebUI URL as `https://aiproxy.xalqbank.az`.
 4. On the server, the request arrived from the WAF, the user's address in the header:
 
    ```bash
