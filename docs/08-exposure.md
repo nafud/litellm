@@ -516,6 +516,13 @@ Also noted: `/health` requests never appear in the access log (my own curls thro
 WAF at 15:37 and 15:41 are absent while `GET /` at 15:39 is present), so the log cannot
 show the WAF's health checks; §8.4 step 4 uses another path.
 
-Still to run: the Open WebUI unit and network file reinstall (§8.2, this fix); DNS A
-record for `aiproxy.xalqbank.az`, then §8.4 in the browser; §8.1 steps 13 to 19 for
-LiteLLM and its A record.
+Fix installed the same day: unit and network file from commit cf14035 (sizes 6443 and
+716, CRLF 0, diffs the planned lines), `daemon-reload`, restart of
+`llmgw-openwebui.service`, all five healthy, the network unchanged (`10.89.0.0/24 gw
+10.89.0.1`). Proof: `curl -H 'X-Forwarded-For: 203.0.113.9' http://10.50.4.68:8080/api/version`
+from the host is logged as `203.0.113.9:0 - "GET /api/version HTTP/1.1" 200`. After the
+restart the container came up as `10.89.0.18`, no longer `.16`, which confirms that the
+subnet, not a single address, was the right value to trust.
+
+Still to run: DNS A record for `aiproxy.xalqbank.az`, then §8.4 in the browser; §8.1
+steps 13 to 19 for LiteLLM and its A record.
