@@ -489,3 +489,14 @@ service still open until the admin ranges are known.
 would exhaust the account's 50 requests per day. Same layout with port 4000,
 `use_x_forwarded_for: true`, and the WAF exposing `/v1/` only; supersedes docs/05
 §5.10's client-subnet rule.
+
+Amended 2026-09-18, after reading the FortiWeb 7.6.7 Administration Guide and 7.4.5
+CLI Reference (docs/08 §8.1): the server policy needs `chunk-encoding enable` (CLI
+only; the default decodes chunked responses into one `Content-Length` body, which
+would hold every answer until the model finishes), HTTP/2 stays off on the policy, no
+bot mitigation policy is attached (its slow-attack detection times HTTP transactions
+out at 60 s by default), and the policy starts in Monitor Mode because the signature
+set will match SQL and code in prompts; exceptions are added from the attack log
+before enforcement. The firewalld address is the FortiWeb's server-side interface
+address, verified on the server with firewalld's denied-packet log if the pool member
+stays down.
