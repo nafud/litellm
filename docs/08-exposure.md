@@ -1,11 +1,13 @@
-# Phase 9: Exposure through the WAF, openwebui.xalqbank.az
+# Phase 9: Exposure through the WAF, openwebui.xalqbank.az and litellm.xalqbank.az
 
-Until now both front-ends were reached through SSH tunnels. This phase puts Open WebUI
-behind the bank's FortiWeb WAF under the name `openwebui.xalqbank.az` (D-33). The WAF is
-the reverse proxy: it holds the certificate, terminates the users' TLS and forwards to
-the server over plain HTTP on the WAF-to-server leg, which firewalld restricts to the
-WAF's address. Nothing new runs on the server. `litellm.xalqbank.az` is the second step
-of the same design and waits for the first developer key (D-33; docs/05 §5.10).
+Until now both front-ends were reached through SSH tunnels. This phase puts them behind
+the bank's FortiWeb WAF: Open WebUI as `openwebui.xalqbank.az` for the users, LiteLLM as
+`litellm.xalqbank.az` for developer tools with a virtual key each (D-33; the LiteLLM
+name was added on request on 2026-09-18, docs/05 §5.10). The WAF is the reverse proxy:
+it holds the certificate, terminates the TLS and forwards to the server over plain HTTP
+on the WAF-to-server leg, which firewalld restricts to the WAF's address. For LiteLLM the
+WAF passes the inference paths only (`/v1/chat/completions`, `/v1/models`, ...); the
+admin UI and the management API stay on the SSH tunnel. Nothing new runs on the server.
 
 Addresses: server `10.50.4.68`; WAF address `10.50.4.100`, meaning the FortiWeb interface
 from which it opens the connections to the server (in Reverse Proxy mode the source of the
@@ -16,18 +18,19 @@ reach). §8.3 checks this on the server.
 flowchart LR
   subgraph user["User workstation (bank network)"]
     browser["Browser<br/>https://openwebui.xalqbank.az"]
+    dev["Developer tool<br/>https://litellm.xalqbank.az/v1<br/>virtual key"]
   end
-  dns["Internal DNS<br/>openwebui.xalqbank.az -> WAF VIP<br/>(A record, internal zone only)"]
+  dns["Internal DNS<br/>one A record per name -> its WAF VIP<br/>(internal zone only)"]
   subgraph waf["FortiWeb WAF"]
-    vip["Virtual IP :443<br/>certificate for openwebui.xalqbank.az<br/>TLS from the browser ends here"]
-    rules["Server policy sp-openwebui<br/>- WebSocket passed through (socket proxy)<br/>- Host header passed through<br/>- adds X-Forwarded-For = user's IP<br/>- chunk encoding on (streaming)<br/>- request-body logging off"]
+    vip["Two virtual IPs :443<br/>one certificate, both names as SANs<br/>TLS from the client ends here"]
+    rules["Server policies sp-openwebui, sp-litellm<br/>- Host header passed through<br/>- adds X-Forwarded-For = client's IP<br/>- chunk encoding on (streaming)<br/>- WebSocket passed through (socket proxy)<br/>- sp-litellm: /v1 inference paths only<br/>- request-body logging off"]
     vip --> rules
   end
   subgraph host["Gateway host xbbovsrlllm001 (10.50.4.68)"]
-    fw["firewalld<br/>port 8080 accepted from 10.50.4.100 only<br/>SSH kept open until the admin ranges are known"]
+    fw["firewalld<br/>ports 8080 and 4000 accepted from 10.50.4.100 only<br/>SSH kept open until the admin ranges are known"]
     subgraph podman["rootless Podman, user llmgw"]
       owui["Open WebUI :8080 (published on 10.50.4.68)<br/>WEBUI_URL=https://openwebui.xalqbank.az<br/>FORWARDED_ALLOW_IPS=10.50.4.100"]
-      litellm["LiteLLM :4000 (loopback)<br/>virtual key 'openwebui'"]
+      litellm["LiteLLM :4000 (loopback + 10.50.4.68)<br/>virtual key per developer<br/>use_x_forwarded_for"]
       presidio["Presidio<br/>masks PII"]
       pg["PostgreSQL"]
       owui -- "http://litellm:4000/v1<br/>internal network" --> litellm
@@ -36,11 +39,13 @@ flowchart LR
       owui --> pg
     end
     fw --> owui
+    fw --> litellm
   end
   provider["Provider<br/>sees placeholders only"]
   browser -. "1 name lookup" .-> dns
   browser == "2 HTTPS" ==> vip
-  rules == "3 HTTP to 10.50.4.68:8080" ==> fw
+  dev == "2 HTTPS" ==> vip
+  rules == "3 HTTP to 10.50.4.68:8080 / :4000" ==> fw
   litellm == "4 HTTPS, masked prompt" ==> provider
 ```
 
@@ -115,7 +120,8 @@ selected in the protection profile (step 9).
 **Step 7, certificate.** Server Objects > Certificates > Local > Generate: Certification
 Name `openwebui.xalqbank.az`, ID Type Domain Name, Domain Name `openwebui.xalqbank.az`,
 Organization and Country as the bank's PKI requires, Subject Alternative Names
-`openwebui.xalqbank.az`, Key Type RSA, Key Size 2048 Bit, Digest Algorithm SHA256,
+`openwebui.xalqbank.az` and `litellm.xalqbank.az` (one certificate serves both server
+policies and is renewed once), Key Type RSA, Key Size 2048 Bit, Digest Algorithm SHA256,
 Enrollment Method File Based, OK. Select the PENDING row, Download, and submit the
 `.csr` to the bank CA (server authentication). The private key stays on the WAF. When
 the signed certificate (PEM) comes back: Local > Import, Type **Local Certificate**
@@ -199,13 +205,75 @@ WAF protections that matter for this application are the TLS termination, the ho
 restriction and the size limits; the signatures are a bonus to be tuned, not a reason to
 block the users' chats.
 
-**DNS.** One A record `openwebui.xalqbank.az` pointing at the virtual IP of step 1, in the
-internal zone only, created after step 12 passes. The server's own address is not
-published under this name.
+**The second name, litellm.xalqbank.az (steps 13 to 19).** Same objects again with a
+second virtual IP, plus one URL access policy that reduces what the WAF forwards to the
+inference paths. Reused from the first name: the X-header rule `xff-openwebui`, the
+constraints profile `hpc-openwebui` (20 MB is more than any prompt needs) and the
+certificate of step 7, which carries both names.
 
-## 8.2 The unit (workstation, then service account)
+**Step 13, virtual IP and virtual server.** Network > Virtual IP > Create New
+`vip-litellm` with the second allocated address; Server Objects > Server > Virtual
+Server > Create New `vs-litellm`, member: Virtual IP `vip-litellm`, Status enabled.
 
-Three lines changed in `deploy/opt/openwebui/llmgw-openwebui.container`:
+**Step 14, health check.** Server Objects > Server > Health Check > Create New
+`hc-litellm`, rule Type HTTP, URL Path `/health/liveliness`, Method GET, Match Type
+Response Code, `200`. The route is unauthenticated in 1.100.1 (it says so in
+`proxy/health_endpoints/_health_endpoints.py`) and answers `"I'm alive!"`; the unit's own
+health check uses it too.
+
+**Step 15, server pool.** Server Objects > Server > Server Pool > Create New > Create
+HTTP Server Pool `pool-litellm`, Server Balance, Server Health Check `hc-litellm`, Round
+Robin, no persistence; member IP `10.50.4.68`, Port `4000`, SSL off, HTTP/2 off, Inherit
+Health Check on.
+
+**Step 16, protected hostname.** Server Objects > Protected Hostnames > Create New
+`ph-litellm`, Default Action Deny; entry Host `litellm.xalqbank.az`, Action Accept.
+
+**Step 17, URL access allowlist.** Web Protection > Access > URL Access, tab URL Access
+Rule, Create New `uar-litellm-allow`: Action Pass; then Create New for each condition,
+URL Type Regular Expression, Meet this condition if the request matches:
+
+```
+^/v1/(chat/completions|completions|embeddings|models|model/info|messages|messages/count_tokens)$
+^/v1/responses(/[^/]+(/input_items|/cancel)?)?$
+^/health/liveliness$
+```
+
+Test each expression with the `>>` validator next to the field. Second rule
+`uar-litellm-deny`: Action Alert & Deny, Severity Medium, one condition `^/`. Then the
+URL Access tab (the policy): Create New `uap-litellm`, add `uar-litellm-allow` first and
+`uar-litellm-deny` second; rules at the top of the list have priority (use Move if the
+order differs). Everything the allowlist does not name is answered by the WAF with its
+block page and logged as `URL Access Violation`: `/ui/`, `/key/...`, `/user/...`,
+`/model/...`, `/spend/...`, `/docs`, the MCP, agent, file and batch routes. The listed
+paths are the OpenAI-format routes the developer tools use (chat and legacy completions,
+embeddings, the Responses API with retrieve, input items and cancel), the model list
+(`/v1/models` needs a virtual key, `/v1/model/info` shows the key's models), and the
+Anthropic-format routes `/v1/messages` and `/v1/messages/count_tokens` for tools that
+speak that dialect. All of them require a virtual key inside LiteLLM; only the health
+route answers without one.
+
+**Step 18, inline protection profile.** Clone `wpp-openwebui` into `wpp-litellm` and set
+URL Access `uap-litellm`; leave **Signatures empty** on this profile for now: the API
+carries key-authenticated JSON only, prompts contain SQL and code, and unlike the
+Open WebUI policy this one cannot run in Monitor Mode (step 19). Signatures can be
+added once the exceptions learned on `sp-openwebui` are known.
+
+**Step 19, server policy and streaming.** Policy > Server Policy > Create New
+`sp-litellm` exactly as step 10 with `vs-litellm`, `pool-litellm`, `ph-litellm`,
+`wpp-litellm`, the same certificate and intermediate group, no HTTP service, and
+**Monitor Mode off**: the guide states that Monitor Mode ignores the URL access actions,
+so with it on the allowlist would not be enforced and `/ui/` would be reachable. Then the
+same CLI lines as step 11 for `sp-litellm` (`set chunk-encoding enable`), and
+`execute telnettest 10.50.4.68:4000` after §8.3.
+
+**DNS.** Two A records, `openwebui.xalqbank.az` to the virtual IP of step 1 and
+`litellm.xalqbank.az` to the one of step 13, in the internal zone only, created after
+step 12 passes. The server's own address is not published under these names.
+
+## 8.2 The units (workstation, then service account)
+
+Open WebUI first. Three lines changed in `deploy/opt/openwebui/llmgw-openwebui.container`:
 `PublishPort=10.50.4.68:8080:8080`, `WEBUI_URL=https://openwebui.xalqbank.az`, and two
 new variables `FORWARDED_ALLOW_IPS=10.50.4.100` and `WEBUI_SESSION_COOKIE_SECURE=true`
 (both read by v0.11.3: `start.sh` passes the first to uvicorn as `--forwarded-allow-ips`,
@@ -233,13 +301,42 @@ admin account, `sudo ss -tlnp | grep ':8080 '` shows the socket on 10.50.4.68, n
 on 127.0.0.1. The SSH tunnel to 8080 stops working at this point; the LiteLLM tunnel to
 4000 is unaffected.
 
+Then LiteLLM: two files. `deploy/opt/litellm/llmgw-litellm.container` gains a second
+`PublishPort=10.50.4.68:4000:4000` line next to the loopback one (Quadlet accepts the
+key several times; the dry-run renders `--publish 127.0.0.1:4000:4000 --publish
+10.50.4.68:4000:4000`), so the admin tunnel of docs/05 §5.8 keeps working unchanged.
+`deploy/opt/litellm/config.yaml` gains `use_x_forwarded_for: true` under
+`general_settings`: the client address stored with each request (`requester_ip_address`
+in `LiteLLM_SpendLogs`, docs/06 §6.7) becomes the `X-Forwarded-For` value, which the WAF
+writes and only the WAF can deliver. Same transfer and check:
+
+```bash
+infosec$ grep -c $'\r' /tmp/llmgw-litellm.container /tmp/config.yaml
+infosec$ sudo diff /opt/llm-gateway/litellm/llmgw-litellm.container /tmp/llmgw-litellm.container; sudo diff /opt/llm-gateway/litellm/config.yaml /tmp/config.yaml
+infosec$ sudo install -m 644 -o llmgw -g llmgw /tmp/llmgw-litellm.container /opt/llm-gateway/litellm/llmgw-litellm.container && sudo install -m 644 -o llmgw -g llmgw /tmp/config.yaml /opt/llm-gateway/litellm/config.yaml && rm /tmp/llmgw-litellm.container /tmp/config.yaml
+```
+
+Counts 0 and 0; the unit diff shows the header line, the `PublishPort` comment and the
+added line; the config diff shows the `use_x_forwarded_for` block only (mode 644 is the
+one docs/05 §5.3 and docs/07 §7.2 used for this file). Then, as `llmgw`:
+
+```bash
+llmgw$ systemctl --user daemon-reload && systemctl --user restart llmgw-litellm.service
+llmgw$ podman ps --format '{{.Names}}\t{{.Status}}'
+llmgw$ podman port litellm
+```
+
+Restarting LiteLLM restarts Open WebUI's upstream only; Open WebUI itself stays up. All
+five healthy; `podman port litellm` prints two lines, `4000/tcp -> 127.0.0.1:4000` and
+`4000/tcp -> 10.50.4.68:4000`; `sudo ss -tlnp | grep ':4000 '` shows both sockets.
+
 ## 8.3 firewalld (admin account)
 
 This is the docs/02 §2.7 step, executed now. The admin ranges for SSH are still
 unknown (docs/01 §1.14 question 5), so the `ssh` service stays allowed from anywhere,
 which is what the host does today without a firewall; the SSH rich rules of §2.7 follow
 when the ranges are known. The Zabbix rule from §2.7 is included so that monitoring
-keeps working. Port 8080 is accepted from the WAF only.
+keeps working. Ports 8080 and 4000 are accepted from the WAF only.
 
 ```bash
 sudo systemctl enable --now firewalld
@@ -248,20 +345,22 @@ sudo firewall-cmd --permanent --zone=public --remove-service=cockpit
 sudo firewall-cmd --permanent --zone=public --remove-service=dhcpv6-client
 sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.100.7.150/32" port port="10050" protocol="tcp" accept'
 sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.50.4.100/32" port port="8080" protocol="tcp" accept'
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.50.4.100/32" port port="4000" protocol="tcp" accept'
 sudo firewall-cmd --reload && sudo firewall-cmd --list-all
 ```
 
-`--list-all` shows `services: ssh`, the two rich rules, no `ports:`. The rule does not
+`--list-all` shows `services: ssh`, the three rich rules, no `ports:`. The rule does not
 affect traffic the host sends to itself (firewalld accepts the loopback interface), so
 `curl -sS http://10.50.4.68:8080/health` from the server still answers; the test of the
 rule is from the workstation:
 
 ```
 curl.exe -sS -m 5 http://10.50.4.68:8080/health
+curl.exe -sS -m 5 http://10.50.4.68:4000/health/liveliness
 ```
 
-must fail (the `public` zone rejects with "No route to host" or times out), while the
-WAF's health check turns the pool member up once §8.1 step 4 is in place.
+both must fail (the `public` zone rejects with "No route to host" or times out), while the
+WAF's health checks turn the pool members up once §8.1 steps 4 and 15 are in place.
 
 If the member stays down, the WAF is not connecting from 10.50.4.100. firewalld can say
 which address it is: enable the denied-packet log, wait one health check interval,
@@ -269,7 +368,7 @@ read the kernel log, then switch the log off again:
 
 ```bash
 sudo firewall-cmd --set-log-denied=unicast
-sudo journalctl -k --since -1m -g 'DPT=8080' | tail -3
+sudo journalctl -k --since -1m -g 'DPT=(8080|4000)' | tail -3
 sudo firewall-cmd --set-log-denied=off
 ```
 
@@ -294,16 +393,44 @@ are corrected to that address, not the other way round.
    workstation's address), not 10.50.4.100, which proves `FORWARDED_ALLOW_IPS` works.
 5. Sign out and in again: the cookie is accepted (Secure flag, HTTPS).
 
+LiteLLM round trip (workstation, then server). The virtual key goes into a header file
+written in Notepad, never on the command line: `hdr.txt` with the single line
+`Authorization: Bearer <the docs/05 test key, which has mock-echo>`; delete the file afterwards.
+
+```
+curl.exe -sS https://litellm.xalqbank.az/health/liveliness
+curl.exe -sS -o NUL -w "%{http_code}\n" https://litellm.xalqbank.az/ui/
+curl.exe -sS -o NUL -w "%{http_code}\n" https://litellm.xalqbank.az/key/info
+curl.exe -sS https://litellm.xalqbank.az/v1/models -H @hdr.txt
+curl.exe -sS -N https://litellm.xalqbank.az/v1/chat/completions -H @hdr.txt -H "Content-Type: application/json" -d "{\"model\":\"mock-echo\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Dennis Yurichev, card 5555 5555 5555 4444\"}]}"
+del hdr.txt
+```
+
+Expected: `"I'm alive!"`; `403` twice (the WAF's block page, and Log & Report > Log
+Access > Attack shows `URL Access Violation` for both); the key's model list; SSE
+chunks arriving as a stream with the echo (masking applies as in docs/05 §5.4). On the
+server, the request is attributed to the workstation, not to the WAF:
+
+```bash
+llmgw$ podman exec postgres psql -U litellm -d litellm -tAc "select \"startTime\", model, requester_ip_address from \"LiteLLM_SpendLogs\" order by \"startTime\" desc limit 3"
+```
+
+The newest row shows the workstation's address (`use_x_forwarded_for`); rows from Open
+WebUI show the container network address of Open WebUI, as before.
+
 ## 8.5 Exit criteria and what comes next
 
 - 8.2 to 8.4 pass; results recorded below.
 - The tunnel to 8080 is retired from docs/07 §7.6 for daily use; the LiteLLM admin UI
   keeps its tunnel (docs/05 §5.8).
 
-Next, in this order: `litellm.xalqbank.az` when the first developer key exists (same
-steps with port 4000, `general_settings.use_x_forwarded_for: true` in `config.yaml`, and
-the WAF exposing `/v1/` only), the SSH rich rules once the admin ranges are known
-(docs/02 §2.7), the egress policy (docs/02 §2.8), Active Directory login.
+- Developer keys are issued per person as in docs/06 §6.6; the base URL handed out is
+  `https://litellm.xalqbank.az/v1`. Until the Gemini key exists, every key shares the
+  free tier's 50 requests per day (D-31), so one coding assistant can exhaust it.
+
+Next, in this order: the SSH rich rules once the admin ranges are known (docs/02 §2.7),
+the egress policy (docs/02 §2.8), Active Directory login, signatures on `sp-litellm`
+once the exceptions learned on `sp-openwebui` are known.
 
 ## Results
 

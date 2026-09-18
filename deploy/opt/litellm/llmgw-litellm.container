@@ -1,4 +1,4 @@
-# LiteLLM proxy: the only service with a published port and the only one with egress.
+# LiteLLM proxy: the only service with egress.
 [Unit]
 Description=LLM gateway: LiteLLM proxy
 # PostgreSQL is mandatory (allow_requests_on_db_unavailable: false): start after it is
@@ -37,9 +37,13 @@ Environment=LITELLM_DONT_SHOW_FEEDBACK_BOX=True
 # Configuration, read-only, private SELinux label (ignored while SELinux is disabled).
 Volume=/opt/llm-gateway/litellm/config.yaml:/app/config.yaml:ro,Z
 Tmpfs=/tmp
-# Loopback only until TLS termination is in place (DECISIONS.md D-10); the address is
-# deployment configuration and is changed here, committed, then the unit reloaded.
+# Published twice: on the loopback for the admin tunnel (docs/05 §5.8), and on the host
+# address for the WAF, which serves litellm.xalqbank.az from here over plain HTTP (D-33,
+# docs/08); firewalld accepts 4000 from the WAF address 10.50.4.100 only (docs/08 §8.3)
+# and the WAF passes the /v1/ inference paths only (docs/08 §8.1). Until docs/08 §8.2
+# was run the second line was absent (loopback only, D-10).
 PublishPort=127.0.0.1:4000:4000
+PublishPort=10.50.4.68:4000:4000
 # Arguments to the image entrypoint (prod_entrypoint.sh -> litellm "$@").
 Exec=--config /app/config.yaml --port 4000
 Network=llmgw-backend.network

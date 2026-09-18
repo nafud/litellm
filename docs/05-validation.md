@@ -344,3 +344,6 @@ Plain HTTP on the LAN is acceptable only until TLS termination is in place (D-10
 *Superseded 2026-09-17 (D-33):* port 4000 is not opened to a client subnet. When
 litellm.xalqbank.az goes live it is published for the WAF address only, like Open WebUI
 in docs/08, and the WAF exposes `/v1/` alone.
+
+*Updated 2026-09-18:* `litellm.xalqbank.az` goes live together with Open WebUI, on
+request; the steps are docs/08 §8.1 (steps 13 to 19), §8.2 and §8.3.

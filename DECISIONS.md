@@ -500,3 +500,13 @@ set will match SQL and code in prompts; exceptions are added from the attack log
 before enforcement. The firewalld address is the FortiWeb's server-side interface
 address, verified on the server with firewalld's denied-packet log if the pool member
 stays down.
+
+Amended 2026-09-18 (2): `litellm.xalqbank.az` goes live together with Open WebUI, on
+request, instead of waiting for the first developer key; the free-tier limit stands (50
+requests per day shared by every key until the Gemini key exists, D-31). The WAF
+forwards only the inference paths, by a URL access allowlist on that policy (docs/08
+§8.1 step 17); that policy runs with Monitor Mode off, because Monitor Mode disables URL
+access enforcement, and without a signature set at first. The LiteLLM unit keeps its
+loopback publish for the admin tunnel and adds the host address; `use_x_forwarded_for:
+true` records the developer's address per request. One certificate with both names as
+SANs serves both server policies.
