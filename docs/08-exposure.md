@@ -457,4 +457,16 @@ LiteLLM was healthy `restart llmgw-openwebui.service`; all five containers healt
 `/health/liveliness` answers `"I'm alive!"`; from the workstation both requests time out
 after 5 s (firewalld). The SSH tunnel to 8080 is retired; the one to 4000 still works.
 
+**2026-09-18, WAF-to-server reachability.** From the FortiWeb CLI, `execute telnettest
+10.50.4.68:8080` connects and `execute telnettest 10.50.4.68:4000` times out, although
+both ports have the same firewalld rich rule and both sockets answer from the host. To
+rule out the port number, a runtime-only rich rule for 8000 and a throwaway listener
+(`python3 -m http.server 8000 --bind 10.50.4.68`) were put up for one test: 8000 times
+out the same way; rule and listener removed, the three permanent rules confirmed. So a
+device on the path between the FortiWeb and the server permits 8080 only; the server
+side is not involved (a firewalld rejection would need a different source address, and
+8080 proves the address). Port 4000 stays; the network team is asked to permit TCP 4000
+from the FortiWeb's server-side address to 10.50.4.68. The Open WebUI objects (§8.1
+steps 1 to 12) do not depend on it and proceed meanwhile.
+
 Still to run: §8.1 (WAF steps 1 to 19, DNS) and §8.4.
