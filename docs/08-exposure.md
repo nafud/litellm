@@ -536,17 +536,16 @@ that exited at 16:13:11; firewalld's log-denied state; the rsyslog target) shows
   ends with the same four served requests: `/`, `/manifest.json`, `/api/config`,
   `/api/version`. 132 `/_app/version.json` polls in between: the page stays open and
   its client-side code keeps running.
-- WebSocket handshakes received today: 0. In v0.11.3 the client opens its socket.io
-  WebSocket at `/ws/socket.io/` right after `/api/config`, unconditionally and with the
-  `websocket` transport only (`+layout.svelte` line 1263, `socket/main.py` line 94;
-  `ENABLE_WEBSOCKET_SUPPORT` defaults to true and the unit does not set it). uvicorn
-  0.51.0 logs every WebSocket handshake it receives, accepted or refused, on
-  `uvicorn.error` (all three implementations in the wheel), and Open WebUI routes that
-  logger to stdout. So 37 handshakes were sent and none reached the container: they
-  are answered in front of the server, i.e. by the WAF, the only device there. Whether
-  the login `POST` was also attempted cannot be read from the server (no `POST`
-  arrived); the browser's Network tab or the WAF attack log tells which request carries
-  the visible 500.
+- WebSocket handshakes in the journal: 0. This was first read as "37 handshakes sent,
+  none arrived" and is retracted: the WAF's traffic log shows the handshakes answered
+  `101` (below), and the journal cannot show them. Open WebUI v0.11.3 empties the
+  handlers of the `uvicorn` logger in `start_logger` without touching its
+  `propagate: False` from uvicorn's own logging config, so everything uvicorn emits on
+  `uvicorn.error` after start-up is dropped: WebSocket `[accepted]` lines, and also
+  `Application startup complete.` and `Uvicorn running on ...`, which are absent from
+  every start in today's journal. Only `uvicorn.access` (the request lines) is kept,
+  through `AUDIT_UVICORN_LOGGER_NAMES`. So the journal proves what the server
+  answered to HTTP requests and nothing about WebSocket.
 - Not related: the unit that exited at 16:13:11 is the new container's first health
   check, run 0.1 s after `container start` and before uvicorn listened (`unhealthy`,
   then healthy from 16:13:42; the unit's `HealthStartPeriod=180s` covers it). firewalld
@@ -557,17 +556,21 @@ that exited at 16:13:11; firewalld's log-denied state; the rsyslog target) shows
   lines are host-side curls through its published port (container-side addresses,
   the rootlessport effect); the WAF has no LiteLLM policy yet.
 
-What the FortiWeb 7.6.7 guide says about WebSocket (page 754, 761 to 763): FortiWeb
-passes WebSocket "as a pure socket proxy" unless told otherwise, and three settings
-turn a handshake into a violation answered with the block page: the **WebSocket
-Protocol** item of the HTTP Protocol Constraints object attached to `wpp-openwebui`
-(Web Protection > Protocol > HTTP; CLI exception field `web-socket-protocol-check`),
-a **WebSocket security policy** on the profile with Block WebSocket Traffic or with
-extensions blocked (the browser sends `Sec-WebSocket-Extensions: permessage-deflate`,
-and the unit runs uvicorn with `--ws-per-message-deflate true`), and a **URL access**
-rule on that policy that does not include `/ws/`. The attack log names the one that
-fired: `HTTP Protocol Constraints`, `WebSocket Traffic not Allowed`, `WebSocket
-Extensions not Allowed` or `URL Access`. To be read on the WAF when that work resumes.
+**2026-09-18, the WAF's own logs (screenshots).** Attack log, host
+`aiproxy.xalqbank.az`, severity above Informative: two rows only, 15:23:31 and
+15:23:33, source 10.240.234.5 (the workstation's browser, TLS 1.2), `GET /` and
+`GET /favicon.ico`, `Protected Hostnames` / `HTTP Host Violation`, Alert_Deny: the name
+was not yet in the protected-hostname list; nothing since. Traffic log, same host: the
+policy is **`InternalSystemsPolicy`**, HTTP content routing and server pool both named
+`10.50.4.68_8080`, Monitor Mode Disabled, i.e. Open WebUI was added to an existing
+shared server policy rather than the dedicated `sp-openwebui` of §8.1; whatever
+profile, signature set, constraints, chunk-encoding and HTTP/2 settings that policy has
+apply to Open WebUI, in blocking mode, and any change for Open WebUI (chunk-encoding,
+HSTS) touches every other system behind it. Between 16:41:26 and 16:51:24 every row is
+`200`, `304` or `101`; the two `101` rows at 16:41:26 and 16:41:28 are the socket.io
+WebSocket upgrades of that page load, accepted end to end. Status `success`, request
+736 bytes, response 315 bytes for a `version.json` poll. No `500` in the visible rows;
+a Return Code filter over the whole period is the next read.
 
-Still to run: the WebSocket item above, then DNS A record for `aiproxy.xalqbank.az`
+Still to run: the traffic-log Return Code filter, then DNS A record for `aiproxy.xalqbank.az`
 and §8.4 in the browser; §8.1 steps 13 to 19 for LiteLLM and its A record.
