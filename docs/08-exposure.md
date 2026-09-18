@@ -478,4 +478,19 @@ line unchanged; 443 would have needed a privileged-port sysctl for rootless Podm
 unit, the §8.3 rule (8443 in place of 4000) and step 15 (member port 8443) were
 corrected; the unit is reinstalled and the rule swapped as recorded below.
 
-Still to run: §8.1 (WAF steps 1 to 19, DNS) and §8.4.
+**2026-09-18, Open WebUI through the WAF (§8.1 steps 1 to 12).** Built on the FortiWeb
+by the bank's WAF administrator; virtual IP `10.50.11.14`, bank-signed certificate in
+place. No DNS record yet, so the test pins the name with curl (`--resolve
+aiproxy.xalqbank.az:443:10.50.11.14`), which sets SNI and `Host` like a browser would:
+`/health` answers `200`, `server: uvicorn`, `{"status":true}`, and `/` answers `200`
+with the 11247-byte login page, both with the certificate validated (no `-k`). The WAF
+adds its own tracking cookie `cookiesession1` (client management, persistent one year
+by default; `set http-session-cookie enable` on the profile makes it a session cookie).
+A request to the bare address (`https://10.50.11.14/`, `Host` not the protected
+hostname) gets the WAF's own `500 Internal Server Error` page: the protected-hostname
+rule of step 5 working, which is what was first taken for a fault. Open point: the
+response carries no `strict-transport-security` header, so Add HSTS Header of step 10
+is not in effect yet.
+
+Still to run: DNS A record for `aiproxy.xalqbank.az`, then §8.4 in the browser; §8.1
+steps 13 to 19 for LiteLLM and its A record.
