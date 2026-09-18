@@ -81,7 +81,7 @@ older tutorials still reference the Microsoft registry.
 | 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | procedures written; **next**: first dump with restore test (§6.1) and routine checks (§6.2); schedule and off-host copy wait for D-28 |
 | 7 | Provider choice, key, real round trip | `docs/05-validation.md` §5.7 | Gemini chosen 2026-09-16 (D-29), key not yet obtained; OpenRouter free tier as testing provider (`nemotron-3-super`) since 2026-09-17, round trip through the browser verified (D-31, §5.7a); Gemini steps wait for the key |
 | 8 | Open WebUI for the users | `docs/07-openwebui.md`, `deploy/opt/openwebui/` | deployed 2026-09-17 (D-30, D-32), masking round trip through the browser verified; on `nemotron-3-super` since §5.7a; exposure is phase 9 |
-| 9 | Exposure through the FortiWeb WAF: `aiproxy.xalqbank.az`, `litellm.xalqbank.az`, firewalld | `docs/08-exposure.md` | written 2026-09-17, WAF procedure verified against the FortiWeb guides and the LiteLLM name added on request 2026-09-18 (D-33); WAF steps, DNS and §8.2 to §8.4 to run |
+| 9 | Exposure through the FortiWeb WAF: `aiproxy.xalqbank.az`, `litellm.xalqbank.az`, firewalld | `docs/08-exposure.md` | written 2026-09-17, WAF procedure verified against the FortiWeb guides and the LiteLLM name added on request 2026-09-18 (D-33); §8.3 and §8.2 run 2026-09-18 (firewalld up, both front-ends published on the host address, reachable from the WAF address only); WAF steps, DNS and §8.4 to run |
 | later | SSH source ranges, egress policy, Active Directory login, signatures on the LiteLLM policy, front-end findings | `docs/08-exposure.md` §8.5, `docs/07-openwebui.md` §7.8, D-22 | open |
 
 ## Repository layout

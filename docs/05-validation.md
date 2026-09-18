@@ -346,4 +346,4 @@ litellm.xalqbank.az goes live it is published for the WAF address only, like Ope
 in docs/08, and the WAF exposes `/v1/` alone.
 
 *Updated 2026-09-18:* `litellm.xalqbank.az` goes live together with Open WebUI, on
-request; the steps are docs/08 §8.1 (steps 13 to 19), §8.2 and §8.3.
+request; the steps are docs/08 §8.1 (steps 13 to 19), §8.3 and §8.2 (run 2026-09-18), then §8.4.

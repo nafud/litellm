@@ -273,6 +273,11 @@ step 12 passes. The server's own address is not published under these names.
 
 ## 8.2 The units (workstation, then service account)
 
+Order: §8.3 runs before this section. From the restart on, both ports listen on the
+host address, and until firewalld is up any host on the network reaches them; with the
+rich rules in place first there is no such window. The section numbers stay as the
+units and DECISIONS.md cite them.
+
 Open WebUI first. Three lines changed in `deploy/opt/openwebui/llmgw-openwebui.container`:
 `PublishPort=10.50.4.68:8080:8080`, `WEBUI_URL=https://aiproxy.xalqbank.az`, and two
 new variables `FORWARDED_ALLOW_IPS=10.50.4.100` and `WEBUI_SESSION_COOKIE_SECURE=true`
@@ -330,9 +335,12 @@ Restarting LiteLLM restarts Open WebUI's upstream only; Open WebUI itself stays 
 five healthy; `podman port litellm` prints two lines, `4000/tcp -> 127.0.0.1:4000` and
 `4000/tcp -> 10.50.4.68:4000`; `sudo ss -tlnp | grep ':4000 '` shows both sockets.
 
-## 8.3 firewalld (admin account)
+## 8.3 firewalld (admin account, before §8.2)
 
-This is the docs/02 §2.7 step, executed now. The admin ranges for SSH are still
+This is the docs/02 §2.7 step, executed now, before the units of §8.2 are restarted.
+firewalld is installed but inactive on the host; `firewall-offline-cmd --zone=public
+--list-all` shows the zone before it is switched on (`services: cockpit dhcpv6-client
+ssh`), which confirms the SSH session survives the start. The admin ranges for SSH are still
 unknown (docs/01 §1.14 question 5), so the `ssh` service stays allowed from anywhere,
 which is what the host does today without a firewall; the SSH rich rules of §2.7 follow
 when the ranges are known. The Zabbix rule from §2.7 is included so that monitoring
@@ -434,4 +442,19 @@ once the exceptions learned on `sp-openwebui` are known.
 
 ## Results
 
-Not yet run.
+**2026-09-18, server side (§8.3 then §8.2), all as expected.** The three files were
+copied from the branch ZIP at commit 8a2b744 (sizes 5931, 3668 and 6596 bytes, CRLF
+count 0 each); `sudo diff` showed the planned lines plus two comment-only hunks from
+earlier commits that had never been installed (the health-check comment in the Open WebUI
+unit, the UI-directory comment in the LiteLLM unit). firewalld 2.4.3-4.el10_2 was
+enabled first: zone `public` active on `ens33`, `services: ssh`, no ports, the three
+rich rules (10050 from 10.100.7.150, 8080 and 4000 from 10.50.4.100). Then the installs
+(mode 644, owner `llmgw`), `daemon-reload`, `restart llmgw-litellm.service`, and once
+LiteLLM was healthy `restart llmgw-openwebui.service`; all five containers healthy.
+`podman port` prints `4000/tcp -> 127.0.0.1:4000`, `4000/tcp -> 10.50.4.68:4000` and
+`8080/tcp -> 10.50.4.68:8080`; `ss -tlnp` shows the same three sockets, all owned by
+`rootlessport`. From the host, `/health` answers `{"status":true}` and
+`/health/liveliness` answers `"I'm alive!"`; from the workstation both requests time out
+after 5 s (firewalld). The SSH tunnel to 8080 is retired; the one to 4000 still works.
+
+Still to run: §8.1 (WAF steps 1 to 19, DNS) and §8.4.
