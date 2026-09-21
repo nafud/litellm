@@ -392,6 +392,51 @@ are corrected to that address, not the other way round.
 
 ## 8.4 Round trip (workstation, browser)
 
+**Step 0, when the browser shows a 500: which device sent it.** Three devices can
+answer a browser on this path and each signs its answer. Read the failing response in
+the browser's DevTools (F12, Network, reload, click the row whose status is 500,
+Headers, Response Headers):
+
+- `server: uvicorn` and a `date:` header: the answer is Open WebUI's. The journal has the
+  matching line, `sudo journalctl _SYSTEMD_USER_UNIT=llmgw-openwebui.service --since -10m | grep -E '" 500'`,
+  and the lines above it carry the traceback. Nothing in the v0.11.3 code that serves
+  `/`, `/api/config`, `/api/version` or the sign-in `POST` returns a 500 on its own; a
+  500 there is a traceback, and the traceback is the finding.
+- no `server` header, `Content-Length: 1382`, `Content-Type: text/html`, body titled
+  `Access Denied`: FortiWeb's block page (the same page answers 500 for a protected-
+  hostname violation and 403 for a URL access violation). Log & Report > Log Access >
+  Attack, the row at that second, names the rule; the address bar names the cause
+  when the request went to the bare virtual IP or to a name that is not in
+  `ph-openwebui`.
+- a page reading `500: Internal Error` inside Open WebUI's own layout: the front-end's
+  error page (`src/routes/+error.svelte` prints `status: message`), no HTTP 500 was
+  received, and the browser console (DevTools, Console) holds the JavaScript error.
+
+The server's side of the same question, run on the host without the WAF, secrets never
+printed (the three env-file variables are filtered out of the environment listing):
+
+```bash
+llmgw$ podman ps --format '{{.Names}}\t{{.Status}}'; podman port openwebui
+llmgw$ podman inspect openwebui --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -vE '^(WEBUI_SECRET_KEY|DATABASE_URL|OPENAI_API_KEY)=' | sort
+llmgw$ stat -c '%U:%G %a %n' /opt/llm-gateway/openwebui/openwebui.env /opt/llm-gateway/openwebui/data
+llmgw$ grep -c $'\r' /opt/llm-gateway/openwebui/openwebui.env; grep -cE '^(WEBUI_SECRET_KEY|DATABASE_URL|OPENAI_API_KEY)=' /opt/llm-gateway/openwebui/openwebui.env; grep -c REPLACE /opt/llm-gateway/openwebui/openwebui.env
+llmgw$ H='Host: aiproxy.xalqbank.az'; P='X-Forwarded-Proto: https'
+llmgw$ curl -sS -D - -o /dev/null -H "$H" -H "$P" http://10.50.4.68:8080/ | head -4
+llmgw$ curl -sS -o /dev/null -w '%{http_code}\n' -H "$H" -H "$P" http://10.50.4.68:8080/api/config
+llmgw$ curl -sS -o /dev/null -w '%{http_code}\n' -H "$H" -H "$P" -H 'Content-Type: application/json' -X POST -d '{"email":"nobody@example.com","password":"wrong"}' http://10.50.4.68:8080/api/v1/auths/signin
+llmgw$ curl -s -i -m 3 -H "$H" -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' 'http://10.50.4.68:8080/ws/socket.io/?EIO=4&transport=websocket' 2>/dev/null | head -1
+```
+
+Expected: five `healthy`, `8080/tcp -> 10.50.4.68:8080`; the environment listing shows
+the unit's 25 variables with the values of the unit file (the image adds its own, such
+as `SENTENCE_TRANSFORMERS_HOME`); `llmgw:llmgw 600` and `llmgw:llmgw 700`; `0`, `3`, `0`;
+`HTTP/1.1 200 OK` with `server: uvicorn`; `200`; `400` (a wrong password is answered
+400 `invalid credentials` in v0.11.3 `routers/auths.py`, which proves the `POST` path,
+the session cookie and the database round trip; run it once, the sign-in rate limiter
+answers 429 after repeats); `HTTP/1.1 101 Switching Protocols`. All of these pass on a
+server that is configured as the unit says; a browser 500 then has the WAF or the
+browser's own page as its sender, never this container.
+
 1. `https://aiproxy.xalqbank.az/` shows the login page with a valid certificate (the
    padlock names the WAF's CA), no warning.
 2. Log in as the admin, send the docs/07 §7.6 name test; the answer streams token by
@@ -572,5 +617,34 @@ WebSocket upgrades of that page load, accepted end to end. Status `success`, req
 736 bytes, response 315 bytes for a `version.json` poll. No `500` in the visible rows;
 a Return Code filter over the whole period is the next read.
 
-Still to run: the traffic-log Return Code filter, then DNS A record for `aiproxy.xalqbank.az`
-and §8.4 in the browser; §8.1 steps 13 to 19 for LiteLLM and its A record.
+**2026-09-21, Return Code filter, DNS, and the repository read end to end.** Traffic
+log, Date >= 2026/09/17 16:53 and Return Code >= 400, every host: no results. So no
+client has received a 4xx or 5xx through a server policy since the pool went up; the
+two 15:23 rows of the attack log (block page, 500, `HTTP Host Violation`) remain the
+only 500 on record. The internal A record for `aiproxy.xalqbank.az` exists now; the
+browser still reports a 500, and the request was to inspect the repository and the
+container configuration once more before a server restart. Done, against the sources
+rather than the docs: the seven unit files run through the Quadlet generator of Podman
+5.6 (`--dryrun`), no warning, the rendered `podman run` line of `llmgw-openwebui.service`
+carries the 25 variables, the `/data` volume, the single publish and the health check;
+each of the 25 variables is read by v0.11.3 (`config.py`, `env.py`, `start.sh`), with
+the parse each one gets (`.lower() == 'true'`, `WEBUI_AUTH_COOKIE_SECURE` inheriting
+`WEBUI_SESSION_COOKIE_SECURE`, `OFFLINE_MODE` setting `HF_HUB_OFFLINE=1` and switching
+the version check off, `FORWARDED_ALLOW_IPS` passed to uvicorn as
+`--forwarded-allow-ips`); `CORS_ALLOW_ORIGIN` unset means `*` for the API and for
+socket.io (`socket/main.py` maps `['*']` to `'*'`), so no origin is refused;
+`WEBSOCKET_MANAGER` unset means the in-process manager, no Redis needed; `DATABASE_URL`
+with `postgresql://` is rewritten to the psycopg 3 driver in `internal/db.py`, both
+drivers are in the image. The routes the browser loads (`/`, `/api/config`,
+`/api/version`, `/health`, the sign-in `POST`, the socket.io upgrade) contain no code
+path that answers 500 without a traceback in the journal, and the journal of 2026-09-18
+holds none. `config.yaml` parses; `images.tsv` and the units pin the same digests; no
+deploy file changed since commit cf14035, the one installed on 2026-09-18, so the
+installed copies must hash to the repository's. Outcome: the configuration cannot
+produce the symptom; a 500 has a sender, and §8.4 step 0 (added today) reads the sender
+off the response headers in the browser and re-proves the container from the host in
+nine lines.
+
+Still to run: §8.4 step 0 after the restart, then §8.4 in the browser; the dedicated
+`sp-openwebui` in place of `InternalSystemsPolicy` (Monitor Mode, `chunk-encoding
+enable`, HSTS); §8.1 steps 13 to 19 for LiteLLM and its A record.
