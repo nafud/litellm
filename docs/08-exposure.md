@@ -571,11 +571,22 @@ origin's, and forwards it with a `Content-Length` of its own; gzip and uncompres
 bodies of the same file pass byte for byte (Results, 2026-09-21, sizes and hashes). It
 affects every browser, since browsers offer zstd over HTTPS.
 
-Items 1 and 2 are settings of the dedicated `sp-openwebui` of §8.1 steps 6, 9, 10 and
-11; on the shared `InternalSystemsPolicy` they apply to every system behind it, which
-is one more reason for the dedicated policy (Results, 2026-09-18). The same X-header
-rule is what `use_x_forwarded_for: true` in LiteLLM's config needs on `sp-litellm`
-(§8.1 steps 13 to 19).
+Scope on the shared policy (added the same day, with WAF admin access in hand). Open
+WebUI is an HTTP content routing entry of `InternalSystemsPolicy`, and the 7.6.7
+Administration Guide (server policy, HTTP Content Routing) lets each entry carry its
+own Web Protection Profile when Inherit Web Protection Profile is off (CLI
+`profile-inherit disable` in `HTTP-content-routing-list`). Item 1 therefore needs no
+dedicated policy: a clone of the policy's profile as `wpp-openwebui` with
+`xff-openwebui` selected, set on the `10.50.4.68_8080` entry alone; every other entry
+keeps the inherited profile. Item 2, `chunk-encoding`, is a setting of the server
+policy and applies to every entry on it: it forwards chunked responses as chunks
+instead of re-framing them with a `Content-Length`, HTTP/1.1 baseline behaviour that
+every client handles, and the decision is taken with the list of the other entries in
+view. Item 3 needs no change; the decompression rule of the shared profile (guide,
+Compression, page 570) is what put the WAF's zstd path on the response. The dedicated
+`sp-openwebui` of §8.1 (its own VIP, Monitor Mode, HSTS) stays the design for when a
+virtual IP is allocated; the same X-header rule is what `use_x_forwarded_for: true`
+in LiteLLM's config needs on `sp-litellm` (§8.1 steps 13 to 19).
 
 ## Results
 
