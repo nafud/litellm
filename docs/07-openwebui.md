@@ -244,3 +244,18 @@ same day, and to `gemini-2.5-flash` with `/key/update` once that key exists).
 - §7.7 after 20 minutes of use: LiteLLM 906 MB (ceiling 4 GiB), Open WebUI 778 MB
   (2 GiB), analyzer 2.2 GB (5 GiB), anonymizer 56 MB (1 GiB), PostgreSQL 270 MB
   (1.5 GiB); host 5.2 GB used of 15.7 GB, swap 0. The D-15 split holds.
+
+**Active Directory login, deferred 2026-09-21 (owner decision).** Open WebUI v0.11.3
+supports LDAP natively (`config.py`: `ENABLE_LDAP`, `LDAP_SERVER_HOST`, `LDAP_SERVER_PORT`,
+`LDAP_APP_DN`, `LDAP_APP_PASSWORD`, `LDAP_SEARCH_BASE`, `LDAP_SEARCH_FILTER`,
+`LDAP_ATTRIBUTE_FOR_USERNAME`, `LDAP_ATTRIBUTE_FOR_MAIL`, `LDAP_USE_TLS`,
+`LDAP_CA_CERT_FILE`, `LDAP_VALIDATE_CERT`, and `ENABLE_LDAP_GROUP_MANAGEMENT` with
+`LDAP_ATTRIBUTE_FOR_GROUPS`). LiteLLM 1.100.1 has no LDAP at all (its admin-UI SSO is
+OIDC or SAML, five users free), so directory login is Open WebUI's alone. Before it is
+built: the container is on `llmgw-backend` (`Internal=true`) and has no route to a
+domain controller, so it needs the egress network and a rule for TCP 636 to the domain
+controllers, a decision to record; the bind password goes into `openwebui.env`; the
+domain controllers' issuing CA goes on the server as a file for `LDAP_CA_CERT_FILE`
+with certificate validation on. Facts to collect: the controllers' names, the network
+path from 10.50.4.68 on 636, the bind account DN, the search base and gating group,
+`sAMAccountName` versus `userPrincipalName`, `mail` populated, and one test account.
