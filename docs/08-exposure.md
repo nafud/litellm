@@ -900,6 +900,14 @@ address; the item is §8.6 item 1. A wire capture on the host (a stand-in listen
 8080 during a stop, or tcpdump) would show the request as the WAF sends it, and was
 not run: the fix is the same rule whether the header is absent or unusable.
 
-Still to run: the login and the name test of §8.4 steps 2 to 4; §8.6 with the WAF
-administrator, then the verifications it names; the dedicated `sp-openwebui` (Monitor
-Mode, HSTS); §8.1 steps 13 to 19 for LiteLLM and its A record.
+**2026-09-21, §8.4 steps 1 and 2 through the WAF.** Login as the admin at
+`https://aiproxy.xalqbank.az/`; the name test answers `Hello Dennis Yurichev, it's
+great to meet you!` (name and e-mail masked on the way out, the name restored on the
+way back); the card prompt of docs/05 §5.7a answers `Visa "5555 5555 5555 4444"`, the
+documented demonstration: the model reasons about `<CREDIT_CARD_1>` only, guesses the
+brand wrong, and the number in the browser is LiteLLM's restore. Step 4 (the client
+address in the journal) waits on §8.6 item 1.
+
+Still to run: §8.6 with the WAF administrator, then the verifications it names; the
+dedicated `sp-openwebui` (Monitor Mode, HSTS); §8.1 steps 13 to 19 for LiteLLM and
+its A record.
