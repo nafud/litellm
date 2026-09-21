@@ -799,6 +799,19 @@ WAF, zstd, 131142 bytes             cb3ffe2badb41c58f230d84ea2a7ff279a7d0ab7e263
 WAF, gzip, 276634 bytes             76e558d4091ac02394a6b225c33f79a6c47edac6421ed297bcead8f05a466549
 ```
 
+Same day, what the WAF's copy is. Copied to the server with `scp` and decoded with the
+container's own `zstandard`: a complete frame (`decompressobj().eof` true), not a cut
+one, which decodes to 506682 bytes, and those bytes are not the first 506682 of the
+module (SHA-256 `33f261b4…249b3` against `35a2606a…4e09c` for the file's head; the
+first 131142 bytes of the container's stream hash to `9232fdf1…6eaa3`, not to the WAF
+copy's `cb3ffe2b…fafb`). So the FortiWeb decodes the origin's zstd, produces other
+content, and encodes a complete zstd frame of its own around it; it is not a truncation
+of the origin's bytes. The two paths the site will use are intact: the module fetched
+through the WAF with no `Accept-Encoding` (1030641 bytes) and with `gzip`, decoded by
+curl (`--compressed`, 1030641 bytes), both hash to the container's file,
+`dbd9b84507feafcec39ae9279c93466e2d4837d7a8f963afc51b1b9e9fc0bb04`. Only zstd is
+altered, and with the middleware off no zstd leaves the container.
+
 Decision (D-33 amendment 5): the container stops compressing,
 `Environment=ENABLE_COMPRESSION_MIDDLEWARE=false` in `llmgw-openwebui.container`. The
 WAF terminates TLS and inspects response bodies, so it has to decompress whatever the
