@@ -699,6 +699,17 @@ response-side rule is excluded: the server never received the request. Also note
 files for the whole day on heuristic freshness, so a wrong reading of "the chunk
 requests are missing" is expected on every load after the first.
 
-Still to run: §8.4 step 0 (the `nodes/52` test, workstation and server), then §8.4 in
+Same day, the test run. In the container the file is `52.BqbfVCEz.js`; the journal of
+the day had no request for it (`grep -c 'nodes/52\.'` printed 0) while the browser was
+producing the error page. From the workstation's command prompt,
+`curl.exe ... https://aiproxy.xalqbank.az/_app/immutable/nodes/52.BqbfVCEz.js`
+answered `200` and 22955 bytes (the size of the file in the 0.11.3 build), and the
+journal logged the request one second later: `10.89.0.18:45336 - "GET
+/_app/immutable/nodes/52.BqbfVCEz.js HTTP/1.1" 200`. So the WAF forwards that URL and
+the server serves it. The device dropping it is the browser, and the remaining step is
+in the browser: a private window, and the Network tab's Transferred column for the
+`nodes/52` row in the normal window. The WAF side is closed for this symptom.
+
+Still to run: the private-window and Network-tab check on the workstation, then §8.4 in
 the browser; the dedicated `sp-openwebui` in place of `InternalSystemsPolicy` (Monitor
 Mode, `chunk-encoding enable`, HSTS); §8.1 steps 13 to 19 for LiteLLM and its A record.
