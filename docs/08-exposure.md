@@ -409,8 +409,24 @@ Headers, Response Headers):
   when the request went to the bare virtual IP or to a name that is not in
   `ph-openwebui`.
 - a page reading `500: Internal Error` inside Open WebUI's own layout: the front-end's
-  error page (`src/routes/+error.svelte` prints `status: message`), no HTTP 500 was
-  received, and the browser console (DevTools, Console) holds the JavaScript error.
+  error page (`src/routes/+error.svelte` prints `status: message`). No HTTP 500 was
+  received. SvelteKit renders it when the JavaScript module of the page being navigated
+  to cannot be imported (its `load_route` catches the failed `import()`, checks
+  `/_app/version.json` for a redeploy, then renders the root error page with the
+  default message `Internal Error`; the app's `handleError` hook is empty, so the
+  console shows nothing from SvelteKit). On this site that page is the `/auth` login
+  page: the `(app)` layout calls `goto('/auth?redirect=…')` when no user is logged in,
+  and the login page is the one route module (`/_app/immutable/nodes/52.<hash>.js`)
+  that a fresh browser has not loaded yet. Which device dropped that request: on the
+  server, `podman exec openwebui ls /app/build/_app/immutable/nodes/ | grep '^52\.'`
+  gives the file name; the journal shows whether it was ever requested; from the
+  workstation, `curl.exe -sS -o NUL -w "%{http_code} %{size_download}\n" https://aiproxy.xalqbank.az/_app/immutable/nodes/52.<hash>.js`
+  answers `200` and about 23 000 bytes when the WAF forwards it (then the browser
+  itself dropped the request: DevTools, Network, filter `nodes/52`, the row's
+  Transferred column reads `Blocked By Extension` or names the blocker; a private
+  window, where Firefox runs no extension, is the counter-test), or `500` and 1382
+  bytes when the WAF blocks it (then Log & Report > Log Access > Attack, filtered on
+  that URL, names the rule to exempt on the policy).
 
 The server's side of the same question, run on the host without the WAF, secrets never
 printed (the three env-file variables are filtered out of the environment listing):
@@ -645,6 +661,44 @@ produce the symptom; a 500 has a sender, and §8.4 step 0 (added today) reads th
 off the response headers in the browser and re-proves the container from the host in
 nine lines.
 
-Still to run: §8.4 step 0 after the restart, then §8.4 in the browser; the dedicated
-`sp-openwebui` in place of `InternalSystemsPolicy` (Monitor Mode, `chunk-encoding
-enable`, HSTS); §8.1 steps 13 to 19 for LiteLLM and its A record.
+**2026-09-21, the 500 identified: the login page's JavaScript module never reaches
+the server.** A screenshot of the browser (Firefox, DevTools Inspector) shows the page
+`500: Internal Error` rendered inside Open WebUI's own layout (`div.m-auto.my-10` under
+`div.bg-white.min-h-screen`, the markup of `src/routes/+error.svelte`), with the root
+layout's skip link above it: the front-end's error page, no HTTP 500 at all, which is
+why neither the journal nor the WAF's traffic log has one. The chain, from the v0.11.3
+sources (`src/routes/+layout.svelte`, `src/routes/(app)/+layout.svelte`), the SvelteKit
+client runtime (`packages/kit/src/runtime/client/client.js`, `load_route`,
+`load_root_error_page`, `stores.updated.check`) and the route table of the 0.11.3 build
+(the PyPI wheel's `entry/app.*.js`: `/` is node 9 under layouts 0 and 2, `/auth` is
+node 52, `/error` node 53), read against the whole-day journal of 2026-09-18:
+
+1. `GET /` 200, then the route modules `nodes/0`, `nodes/2`, `nodes/1`, `nodes/9` and
+   their 160 chunk and stylesheet files, every one 200, 178 requests in two seconds.
+2. The root layout mounts: `GET /api/config` 200; the socket connects (the WAF's `101`
+   rows); its `connect` handler fetches `GET /api/version` 200.
+3. `loaded` becomes true, the `(app)` layout mounts, there is no user, and it calls
+   `goto('/auth?redirect=%2F')`. SvelteKit imports the login page's module,
+   `/_app/immutable/nodes/52.<hash>.js`, the only file of that route not already loaded.
+4. That request never reached the server: not one line for `nodes/52` in the whole
+   day, while the other 164 immutable files were each served once. The import fails,
+   SvelteKit's `load_route` catches it, checks `/_app/version.json` (the request seen
+   immediately after `/api/version` at 15:26:41 and 16:41:27; SvelteKit makes that
+   check only when a navigation ended in an error page) and renders `500: Internal
+   Error`. The app's `handleError` hook is empty, so the console stays silent.
+
+So the request for one specific file is dropped between the browser and the server,
+and never by the server. Two candidates, one test each, both in §8.4 step 0: the
+browser itself (the screenshot shows uBlock Origin and AdBlock installed, and a
+`vsc-initialized` class on `<body>`, injected by another extension; a blocked request
+shows `Blocked By Extension` in the Network tab and a private window loads the page),
+or a request-side rule on `InternalSystemsPolicy` (the curl from the workstation
+answers the block page, 500 and 1382 bytes, and the attack log names the rule). A
+response-side rule is excluded: the server never received the request. Also noted:
+`/_app/immutable/*` is served without `Cache-Control`, and the browser cached the 164
+files for the whole day on heuristic freshness, so a wrong reading of "the chunk
+requests are missing" is expected on every load after the first.
+
+Still to run: §8.4 step 0 (the `nodes/52` test, workstation and server), then §8.4 in
+the browser; the dedicated `sp-openwebui` in place of `InternalSystemsPolicy` (Monitor
+Mode, `chunk-encoding enable`, HSTS); §8.1 steps 13 to 19 for LiteLLM and its A record.
