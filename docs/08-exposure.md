@@ -536,6 +536,47 @@ Next, in this order: the SSH rich rules once the admin ranges are known (docs/02
 the egress policy (docs/02 §2.8), Active Directory login, signatures on `sp-litellm`
 once the exceptions learned on `sp-openwebui` are known.
 
+## 8.6 Change request to the WAF administrator (2026-09-21)
+
+Written after the 2026-09-21 Results. Everything the server can do for these three
+items is done and verified; each one is a setting only the FortiWeb holds.
+
+**1. The client address.** Open WebUI logs the container's own address (`10.89.0.19`)
+for every request, and LiteLLM will store the same for `litellm.xalqbank.az`. The
+server is correct: uvicorn 0.51.0 (the version in the v0.11.3 image) parses
+`FORWARDED_ALLOW_IPS=10.89.0.0/24` as a network, the peer it sees is inside it, and it
+rewrites the client address from `X-Forwarded-For` before the access line is written
+(`uvicorn/middleware/proxy_headers.py`, in place on the request scope; the access line
+reads that scope). A request that arrives without the header, or with one uvicorn
+discards (empty, or the address in `X-Real-IP` instead), leaves the container's
+address in the log; both are cured by the same rule. Ask: the X-header rule of §8.1
+step 6 (`xff-openwebui`: Add X-Forwarded-For on, Add X-Forwarded-Proto on, Delete
+Previous XFF Headers on, Use X-Header to Identify Original Client's IP off) selected in
+the inline protection profile of the policy that serves `aiproxy.xalqbank.az`. Client
+Real IP stays off on the policy (§8.1 step 10): the WAF must keep connecting from
+`10.50.4.100`, which firewalld pins. Verification, on the server:
+`sudo journalctl _SYSTEMD_USER_UNIT=llmgw-openwebui.service --since -5m | grep -E '"(GET|POST) ' | tail -3`
+names the workstation's address after one reload in the browser.
+
+**2. Streaming.** Answers reach the browser in one piece because the policy decodes
+chunked responses into a `Content-Length` body (the default). Ask: `set chunk-encoding
+enable` on the policy (§8.1 step 11, CLI only). Verification: the docs/07 §7.6 name
+test streams word by word.
+
+**3. zstd.** Reported, not asked for, since the origin no longer compresses (D-33
+amendment 5). Reproduction for the WAF administrator against any origin behind the
+same policy that answers zstd: FortiWeb 7.6.7 decodes a zstd-encoded chunked response,
+re-encodes a complete zstd frame of about 128 KiB around content that is not the
+origin's, and forwards it with a `Content-Length` of its own; gzip and uncompressed
+bodies of the same file pass byte for byte (Results, 2026-09-21, sizes and hashes). It
+affects every browser, since browsers offer zstd over HTTPS.
+
+Items 1 and 2 are settings of the dedicated `sp-openwebui` of §8.1 steps 6, 9, 10 and
+11; on the shared `InternalSystemsPolicy` they apply to every system behind it, which
+is one more reason for the dedicated policy (Results, 2026-09-18). The same X-header
+rule is what `use_x_forwarded_for: true` in LiteLLM's config needs on `sp-litellm`
+(§8.1 steps 13 to 19).
+
 ## Results
 
 **2026-09-18, server side (§8.3 then §8.2), all as expected.** The three files were
@@ -845,6 +886,20 @@ tenth of the file's age, about two days for this build), so a browser that saw t
 error page before the fix needs one hard reload or a private window; after that the
 damaged copies are gone.
 
-Still to run: the login and the name test of §8.4 steps 2 to 4; the WAF report and
-change request (zstd handling, `chunk-encoding enable`, the dedicated `sp-openwebui`
-with Monitor Mode and HSTS); §8.1 steps 13 to 19 for LiteLLM and its A record.
+Same day, the client address. After the login page loaded, the journal's access lines
+name `10.89.0.19`, the container's own address, for every request from the browser.
+The unit's `FORWARDED_ALLOW_IPS=10.89.0.0/24` is checked against the code the image
+runs: uvicorn 0.51.0 (the pin of the v0.11.3 wheel), whose `_TrustedHosts` parses a
+`/24` as a network and whose `ProxyHeadersMiddleware` rewrites `scope["client"]` in
+place from `X-Forwarded-For` when the peer is trusted, the peer being inside the
+range; the access line is written from that scope. So the header does not reach
+uvicorn in a usable form, which is what the shared policy predicts: the X-header rule
+of §8.1 step 6 belongs to the profile of the dedicated `sp-openwebui`, and
+`InternalSystemsPolicy` carries none. No server-side setting can supply the client's
+address; the item is §8.6 item 1. A wire capture on the host (a stand-in listener on
+8080 during a stop, or tcpdump) would show the request as the WAF sends it, and was
+not run: the fix is the same rule whether the header is absent or unusable.
+
+Still to run: the login and the name test of §8.4 steps 2 to 4; §8.6 with the WAF
+administrator, then the verifications it names; the dedicated `sp-openwebui` (Monitor
+Mode, HSTS); §8.1 steps 13 to 19 for LiteLLM and its A record.
