@@ -827,6 +827,24 @@ all the same, since every other origin behind `InternalSystemsPolicy` that answe
 is cut the same way; the reproduction is the two workstation curls of §8.4 step 0 run
 against an origin that still compresses. Install per §8.2 (amended paragraph).
 
-Still to run: §8.2's amended install of the unit and its proof; §8.4 in the browser;
-the WAF report; the dedicated `sp-openwebui` in place of `InternalSystemsPolicy` (Monitor
-Mode, `chunk-encoding enable`, HSTS); §8.1 steps 13 to 19 for LiteLLM and its A record.
+**2026-09-21, the amended unit installed; the login page loads through the WAF.** The
+unit from commit 892f33d (SHA-256 `d3af3391…0884e` on the workstation, in `/tmp` and in
+place), CRLF count 0, diff of the twelve expected lines after line 79; `install` as
+`llmgw:llmgw 644`, label `usr_t` unchanged; `daemon-reload` and restart; five healthy,
+the container's environment shows `ENABLE_COMPRESSION_MIDDLEWARE=false`, and the module
+requested from the host with `Accept-Encoding: zstd` answers `content-length: 1030641`
+with no `content-encoding` and no `transfer-encoding`. Through the WAF, with zstd
+offered: `200`, 1030641 bytes, hash `dbd9b845…0bb04`, the container's file. In the
+browser, `fetch(..., {cache: 'reload'})` of the same module: 200, 1030641 bytes,
+`server: uvicorn`, no `content-encoding`; and `https://aiproxy.xalqbank.az/` lands on
+`/auth?redirect=%2F`, the redirect that only the `(app)` layout issues, so nodes 2 and
+9 import and the login form renders. One rollout note: the console test on the page
+that was open before the restart still failed on nodes 2 and 9, from the browser's
+cached copies (no `Cache-Control` on `/_app/immutable/*`, heuristic freshness of one
+tenth of the file's age, about two days for this build), so a browser that saw the
+error page before the fix needs one hard reload or a private window; after that the
+damaged copies are gone.
+
+Still to run: the login and the name test of §8.4 steps 2 to 4; the WAF report and
+change request (zstd handling, `chunk-encoding enable`, the dedicated `sp-openwebui`
+with Monitor Mode and HSTS); §8.1 steps 13 to 19 for LiteLLM and its A record.
