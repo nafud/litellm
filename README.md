@@ -84,6 +84,15 @@ older tutorials still reference the Microsoft registry.
 | 9 | Exposure through the FortiWeb WAF: `aiproxy.xalqbank.az`, `litellm.xalqbank.az`, firewalld | `docs/08-exposure.md` | written 2026-09-17, WAF procedure verified against the FortiWeb guides and the LiteLLM name added on request 2026-09-18 (D-33); §8.3 and §8.2 run 2026-09-18 (firewalld up, both front-ends published on the host address, reachable from the WAF address only); the path from the WAF to the server passes 443, 8080 and 8443 only, so LiteLLM is published on host port 8443 (D-33 amendment 3); Open WebUI WAF objects built and verified by curl through the VIP 2026-09-18; FORWARDED_ALLOW_IPS corrected to the backend subnet (rootlessport peer, D-33 amendment 4), installed and proven the same day; DNS records created 2026-09-21; the browser's `500: Internal Error` traced to the WAF's zstd handling and closed by `ENABLE_COMPRESSION_MIDDLEWARE=false` (D-33 amendment 5), login page loads through the WAF; **open**: §8.4 login and name test, §8.6 change request to the WAF administrator (X-Forwarded-For rule, `chunk-encoding enable`, zstd report, dedicated `sp-openwebui`, HSTS), the LiteLLM WAF objects (§8.1 steps 13 to 19) and its A record |
 | later | SSH source ranges, egress policy, Active Directory login, signatures on the LiteLLM policy, front-end findings | `docs/08-exposure.md` §8.5, `docs/07-openwebui.md` §7.8, D-22 | open |
 
+**Project status, 2026-09-21 (owner decision):** closed as complete for the users' path.
+The deployed configuration carries no workaround: every setting in `deploy/` is the one
+the sources call for, and each deviation from a default is a recorded decision. Open
+items stay listed above and in `docs/08-exposure.md` §8.5 and §8.6 as a register, not
+as blockers: the X-Forwarded-For rule and `chunk-encoding` on the WAF (client address in
+the logs, streaming), the LiteLLM WAF policy, the D-22 host items (SSH key-only login,
+sysctl, SSH source ranges, egress policy), the first backup with a restore test, and the
+provider key (the gateway runs on the OpenRouter free tier until the Gemini key exists).
+
 ## Repository layout
 
 ```
