@@ -77,6 +77,18 @@ Environment=FORWARDED_ALLOW_IPS=10.89.0.0/24
 # The users reach the site over HTTPS, so the session and auth cookies carry the Secure
 # flag (v0.11.3 env.py: the auth cookie setting inherits this one).
 Environment=WEBUI_SESSION_COOKIE_SECURE=true
+# No response compression from the container. v0.11.3 adds starlette-compress to the app
+# when ENABLE_COMPRESSION_MIDDLEWARE is true, its default (env.py, main.py), and that
+# middleware answers a browser with zstd, streamed as chunked transfer. The FortiWeb
+# delivers about 128 KiB of such a response and closes it with a Content-Length of its
+# own (verified 2026-09-21, docs/08 Results: the front-end module nodes/2, 1030641 bytes,
+# leaves the container as 248866 bytes of zstd and reaches the workstation as 131142;
+# gzip and uncompressed bodies pass whole), so the front-end's largest modules arrived
+# cut and the browser showed 500: Internal Error. Browsers offer zstd over HTTPS only,
+# which is why the SSH-tunnel tests of docs/07 never met it. The WAF terminates TLS and
+# inspects bodies, so compression for the browsers is its job (compression offload),
+# not the origin's; with this off, uvicorn sends every body as is (D-33 amendment 5).
+Environment=ENABLE_COMPRESSION_MIDDLEWARE=false
 # Uploads, the vector store (chroma) and caches. Chats, users and settings are in PostgreSQL.
 # Mounted at /data, not at the image's default /app/backend/data: the embedding, whisper
 # and tiktoken models are baked into the image under /app/backend/data/cache, and a bind

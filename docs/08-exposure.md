@@ -310,6 +310,13 @@ admin account, `sudo ss -tlnp | grep ':8080 '` shows the socket on 10.50.4.68, n
 on 127.0.0.1. The SSH tunnel to 8080 stops working at this point; the LiteLLM tunnel to
 4000 is unaffected.
 
+Amended 2026-09-21: one more line in the same unit, `ENABLE_COMPRESSION_MIDDLEWARE=false`
+with its comment (D-33 amendment 5; Results of that day). Same transfer, CRLF count,
+diff (the new line and its comment, nothing else), `install`, then `daemon-reload` and
+restart as `llmgw`. Proof: `podman inspect openwebui --format '{{range .Config.Env}}{{println .}}{{end}}' | grep COMPRESSION`
+prints the line; the two workstation curls of §8.4 step 0 print `200 1030641` each; a
+browser with an empty cache (Ctrl+F5, or a private window) shows the login page.
+
 Then LiteLLM: two files. `deploy/opt/litellm/llmgw-litellm.container` gains a second
 `PublishPort=10.50.4.68:8443:4000` line next to the loopback one (Quadlet accepts the
 key several times; the dry-run renders `--publish 127.0.0.1:4000:4000 --publish
@@ -410,23 +417,41 @@ Headers, Response Headers):
   `ph-openwebui`.
 - a page reading `500: Internal Error` inside Open WebUI's own layout: the front-end's
   error page (`src/routes/+error.svelte` prints `status: message`). No HTTP 500 was
-  received. SvelteKit renders it when the JavaScript module of the page being navigated
-  to cannot be imported (its `load_route` catches the failed `import()`, checks
+  received. SvelteKit renders it when a JavaScript module of the route being loaded
+  cannot be imported (its `load_route` catches the failed `import()`, checks
   `/_app/version.json` for a redeploy, then renders the root error page with the
   default message `Internal Error`; the app's `handleError` hook is empty, so the
-  console shows nothing from SvelteKit). On this site that page is the `/auth` login
-  page: the `(app)` layout calls `goto('/auth?redirect=…')` when no user is logged in,
-  and the login page is the one route module (`/_app/immutable/nodes/52.<hash>.js`)
-  that a fresh browser has not loaded yet. Which device dropped that request: on the
-  server, `podman exec openwebui ls /app/build/_app/immutable/nodes/ | grep '^52\.'`
-  gives the file name; the journal shows whether it was ever requested; from the
-  workstation, `curl.exe -sS -o NUL -w "%{http_code} %{size_download}\n" https://aiproxy.xalqbank.az/_app/immutable/nodes/52.<hash>.js`
-  answers `200` and about 23 000 bytes when the WAF forwards it (then the browser
-  itself dropped the request: DevTools, Network, filter `nodes/52`, the row's
-  Transferred column reads `Blocked By Extension` or names the blocker; a private
-  window, where Firefox runs no extension, is the counter-test), or `500` and 1382
-  bytes when the WAF blocks it (then Log & Report > Log Access > Attack, filtered on
-  that URL, names the rule to exempt on the policy).
+  console shows nothing from SvelteKit). Which module: in the console of the error
+  page, one line (the route table of the 0.11.3 build: `/` is node 9 under layouts 0
+  and 2, `/auth` is node 52, `/error` node 53):
+
+  ```js
+  import(document.querySelector('link[rel="modulepreload"][href*="/entry/app."]').href).then(async a => { for (const i of [0,1,2,9,52,53]) { try { await a.nodes[i](); console.log('node', i, 'OK'); } catch (e) { console.error('node', i, 'FAILED', e); } } })
+  ```
+
+  A `SyntaxError` on a node means a file arrived cut. The sweep imports every module
+  of the build and prints the size and SHA-256 of each one that fails, to compare with
+  `wc -c` and `sha256sum` of the same files under `/app/build/_app/immutable/` in the
+  container (`podman exec openwebui sh -c 'cd /app/build/_app/immutable && wc -c nodes/2.*.js'`
+  as `llmgw`); a module that matches the container fails only because it imports one
+  that does not:
+
+  ```js
+  (async () => { const app = document.querySelector('link[rel="modulepreload"][href*="/entry/app."]').href; const t = await (await fetch(app)).text(); const m = t.match(/m\.f\|\|\(m\.f=\[(.*?)\]\)/); const files = m[1].split(',').map(s => s.replace(/"/g, '')).filter(f => f.endsWith('.js')); for (const f of files) { const url = new URL(f, app).href; try { await import(url); } catch (e) { const b = await (await fetch(url)).arrayBuffer(); const h = [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))].map(x => x.toString(16).padStart(2, '0')).join(''); console.log('BROKEN', f.replace('../', ''), b.byteLength, h); } } console.log('done'); })()
+  ```
+
+  On 2026-09-21 four files were shorter in the browser than in the container because
+  the WAF cuts zstd-compressed responses (Results of that day); the unit now has
+  `ENABLE_COMPRESSION_MIDDLEWARE=false`, and the check that it holds is one curl per
+  encoding from the workstation's command prompt:
+
+  ```
+  curl.exe -sS -o NUL -w "%{http_code} %{size_download}\n" -H "Accept-Encoding: zstd" https://aiproxy.xalqbank.az/_app/immutable/nodes/2.CzaW3MwC.js
+  curl.exe -sS -o NUL -w "%{http_code} %{size_download}\n" -H "Accept-Encoding: gzip" https://aiproxy.xalqbank.az/_app/immutable/nodes/2.CzaW3MwC.js
+  ```
+
+  Both print `200 1030641`, the file's size, with no `content-encoding` in the headers
+  (`-D -` shows them), as long as the WAF does no compression of its own.
 
 The server's side of the same question, run on the host without the WAF, secrets never
 printed (the three env-file variables are filtered out of the environment listing):
@@ -444,7 +469,8 @@ llmgw$ curl -s -i -m 3 -H "$H" -H 'Connection: Upgrade' -H 'Upgrade: websocket' 
 ```
 
 Expected: five `healthy`, `8080/tcp -> 10.50.4.68:8080`; the environment listing shows
-the unit's 25 variables with the values of the unit file (the image adds its own, such
+the unit's 26 variables with the values of the unit file (25 until
+`ENABLE_COMPRESSION_MIDDLEWARE=false` was added on 2026-09-21) (the image adds its own, such
 as `SENTENCE_TRANSFORMERS_HOME`); `llmgw:llmgw 600` and `llmgw:llmgw 700`; `0`, `3`, `0`;
 `HTTP/1.1 200 OK` with `server: uvicorn`; `200`; `400` (a wrong password is answered
 400 `invalid credentials` in v0.11.3 `routers/auths.py`, which proves the `POST` path,
@@ -662,7 +688,10 @@ off the response headers in the browser and re-proves the container from the hos
 nine lines.
 
 **2026-09-21, the 500 identified: the login page's JavaScript module never reaches
-the server.** A screenshot of the browser (Firefox, DevTools Inspector) shows the page
+the server.** *Superseded the same day (next entry): the missing `nodes/52` request was
+a consequence, not the cause. The browser never reached the redirect to `/auth`, because
+the modules of `/` itself arrived cut; the extension theory fell in three browsers.
+Kept as the record of the chain, whose steps 1 to 3 stand.* A screenshot of the browser (Firefox, DevTools Inspector) shows the page
 `500: Internal Error` rendered inside Open WebUI's own layout (`div.m-auto.my-10` under
 `div.bg-white.min-h-screen`, the markup of `src/routes/+error.svelte`), with the root
 layout's skip link above it: the front-end's error page, no HTTP 500 at all, which is
@@ -710,6 +739,81 @@ the server serves it. The device dropping it is the browser, and the remaining s
 in the browser: a private window, and the Network tab's Transferred column for the
 `nodes/52` row in the normal window. The WAF side is closed for this symptom.
 
-Still to run: the private-window and Network-tab check on the workstation, then §8.4 in
-the browser; the dedicated `sp-openwebui` in place of `InternalSystemsPolicy` (Monitor
+**2026-09-21, the cause: the WAF cuts zstd-compressed responses at about 128 KiB, so
+the front-end's largest modules arrive truncated.** Three browsers on the workstation
+(Firefox private window, Chrome private window, Chrome with no extension) show the same
+error page, so the extension theory fell. The route-module test now in §8.4 step 0, run
+in the console: nodes 0, 1, 52 and 53 import; node 2 (the `(app)` layout) fails with
+`SyntaxError: Unexpected token ')'` and node 9 (`/`) with `SyntaxError: Illegal break
+statement`. So `/` itself never renders; the `(app)` layout is the code that calls
+`goto('/auth')`, it never ran, and that is why the journal had no `nodes/52` line.
+`/auth` typed into the address bar shows the login form: its modules are small. The
+sweep over the 215 modules of the build: 17 fail to import; 13 of them match the
+container byte for byte (`wc -c` and `sha256sum` under `/app/build/_app/immutable/`)
+and fail only because they import one of the other four, which the browser receives
+shorter than the container holds them:
+
+| file | bytes in the container | bytes received by the browser |
+|---|---|---|
+| `nodes/2.CzaW3MwC.js` | 1030641 | 506788 |
+| `chunks/BSzRx_1y.js` | 1156825 | 109119 |
+| `chunks/CkTp0x-A.js` | 910684 | 386831 |
+| `chunks/DpphxU7_.js` | 552518 | 28665 |
+
+The response headers of `nodes/2` in the browser: `content-encoding: zstd`,
+`content-length: 131186`, `server: uvicorn`, `vary: Accept-Encoding, Origin`. The
+container compresses: v0.11.3 adds `starlette_compress.CompressMiddleware` to the app
+when `ENABLE_COMPRESSION_MIDDLEWARE` is true, its default (`env.py` line 775, `main.py`
+line 793; starlette-compress 1.7.1 in the image), and the middleware prefers zstd over
+br and gzip when the client offers it. Static files are streamed, so the compressed body
+leaves the container as `transfer-encoding: chunked` with no length. Browsers offer
+zstd over HTTPS only, which is why the tunnel tests of docs/07 (plain HTTP) never met
+the symptom and why the 09-18 curl of `/` (no `Accept-Encoding`) passed. Proof, one
+file, both sides of the WAF, the same minute:
+
+- server, as `llmgw`, straight to `10.50.4.68:8080`, `Accept-Encoding: zstd`:
+  `content-encoding: zstd`, `transfer-encoding: chunked`, 248866 bytes, which the
+  container's own `zstandard` decompresses to 1030641; with `gzip`: chunked, 276634
+  bytes, `gzip -dc` gives 1030641.
+- workstation, through the WAF, `Accept-Encoding: zstd`: `content-encoding: zstd`,
+  `Content-Length: 131142`, a 131142-byte file (the browser had 131186 an hour earlier:
+  the cut moves by a few dozen bytes between runs, so it is not a fixed position in the
+  stream); with `gzip`: `content-length: 276634`, the full stream (its hash differs
+  from the server's copy only because the gzip header carries the time of compression,
+  `GzipFile` in starlette-compress; the size matches to the byte); with no
+  `Accept-Encoding`: `200` and 1030641.
+
+So the chunked-to-length conversion carries a 276634-byte gzip body whole, and the loss
+is specific to zstd: the WAF forwards about 128 KiB of the zstd stream and closes it
+with a `Content-Length` of its own (both length headers are the WAF's, the server sent
+none; the zstd one is spelled `Content-Length` and the gzip one `content-length`,
+uvicorn's spelling, so two code paths inside the FortiWeb). The browser decodes what it
+got, 506788 bytes of a 1030641-byte module, and the import fails at the cut. Hashes for
+a re-check, all SHA-256:
+
+```
+server, zstd stream, 248866 bytes   aa7b956f138f1cc9d25cf425f72471d4602ccc66fa2dee836bcd0e38f7913af3
+server, its first 131186 bytes      a968dcf001fe3ccff1e153fd096e5419b2f8c86febdcf2b7613b00a3a5f0717e
+server, gzip stream, 276634 bytes   9a393dbfde41001a20e2f7ab5033eb1e576040e44469937bb1e7b5dfc2ab3c6c
+WAF, zstd, 131142 bytes             cb3ffe2badb41c58f230d84ea2a7ff279a7d0ab7e26361c91c1649f05517fafb
+WAF, gzip, 276634 bytes             76e558d4091ac02394a6b225c33f79a6c47edac6421ed297bcead8f05a466549
+```
+
+Decision (D-33 amendment 5): the container stops compressing,
+`Environment=ENABLE_COMPRESSION_MIDDLEWARE=false` in `llmgw-openwebui.container`. The
+WAF terminates TLS and inspects response bodies, so it has to decompress whatever the
+origin compresses, and compression for the browsers is its compression offload (7.6.7
+Administration Guide, file compress policy), not the origin's; the WAF-to-server leg is
+a LAN with nothing to gain from it; a plain body cannot be cut by any encoding-specific
+path, whatever the WAF's zstd handling turns out to be; and the line takes effect on the
+next restart without a change on a device shared with other systems. Rejected: a WAF
+change alone, because the server would keep sending zstd to every client that offers it
+and the fault would stay one WAF setting away; a dedicated `sp-openwebui` alone, because
+the zstd path is not among the settings §8.1 chooses. Reported to the WAF administrator
+all the same, since every other origin behind `InternalSystemsPolicy` that answers zstd
+is cut the same way; the reproduction is the two workstation curls of §8.4 step 0 run
+against an origin that still compresses. Install per §8.2 (amended paragraph).
+
+Still to run: §8.2's amended install of the unit and its proof; §8.4 in the browser;
+the WAF report; the dedicated `sp-openwebui` in place of `InternalSystemsPolicy` (Monitor
 Mode, `chunk-encoding enable`, HSTS); §8.1 steps 13 to 19 for LiteLLM and its A record.

@@ -531,3 +531,20 @@ whole backend network is equivalent in effect: the only way onto port 8080 from 
 the host is firewalld's WAF rule, and the other members of that network are this
 deployment's own containers. Open WebUI v0.11.3 cannot see the real peer; the same holds
 for LiteLLM, whose `use_x_forwarded_for` takes the header verbatim anyway.
+
+Amended 2026-09-21 (5): the Open WebUI container stops compressing responses
+(`ENABLE_COMPRESSION_MIDDLEWARE=false` in the unit; v0.11.3 `env.py` reads it, default
+true, and `main.py` adds starlette-compress 1.7.1 to the app when it is true). Cause: the
+middleware answers browsers with zstd, streamed as chunked transfer, and the FortiWeb
+forwards about 128 KiB of such a response and closes it with a `Content-Length` of its
+own, so the front-end's four largest modules arrived cut and every browser showed the
+front-end's `500: Internal Error` page (docs/08 Results, 2026-09-21, with the sizes and
+hashes on both sides of the WAF; gzip and uncompressed bodies pass whole). Browsers
+offer zstd over HTTPS only, so the SSH-tunnel tests of docs/07 never met it. Chosen over
+a WAF change alone because the WAF terminates TLS and inspects response bodies, so it
+must decompress whatever the origin compresses, and compression for the browsers is the
+WAF's compression offload, not the origin's; a plain body cannot be cut by any
+encoding-specific path, whatever the WAF's zstd handling turns out to be; and the line
+takes effect on the next restart without touching a device shared with other systems.
+The behaviour is reported to the WAF administrator all the same: every other origin
+behind `InternalSystemsPolicy` that answers zstd is cut the same way.
