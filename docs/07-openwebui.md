@@ -18,14 +18,14 @@ in `bin/pull-images.sh` and `bin/link-quadlets.sh`, `user_header_name` in
 From the workstation, out of the extracted ZIP (docs/03 §3.3 conventions):
 
 ```
-scp litellm-claude-zealous-lamport-kklwuf\deploy\opt\openwebui\llmgw-openwebui.container litellm-claude-zealous-lamport-kklwuf\deploy\opt\openwebui\openwebui.env.example litellm-claude-zealous-lamport-kklwuf\deploy\opt\bin\images.tsv litellm-claude-zealous-lamport-kklwuf\deploy\opt\bin\pull-images.sh litellm-claude-zealous-lamport-kklwuf\deploy\opt\bin\link-quadlets.sh litellm-claude-zealous-lamport-kklwuf\deploy\opt\litellm\config.yaml litellm-claude-zealous-lamport-kklwuf\deploy\opt\litellm\llmgw-litellm.container infosec@10.50.4.68:/tmp/
+scp litellm-<branch>\deploy\opt\openwebui\llmgw-openwebui.container litellm-<branch>\deploy\opt\openwebui\openwebui.env.example litellm-<branch>\deploy\opt\bin\images.tsv litellm-<branch>\deploy\opt\bin\pull-images.sh litellm-<branch>\deploy\opt\bin\link-quadlets.sh litellm-<branch>\deploy\opt\litellm\config.yaml litellm-<branch>\deploy\opt\litellm\llmgw-litellm.container sysadmin@192.0.2.10:/tmp/
 ```
 
 On the server, CRLF check and diff of the five files that already exist:
 
 ```bash
-infosec$ cd /tmp && grep -c $'\r' llmgw-openwebui.container openwebui.env.example images.tsv pull-images.sh link-quadlets.sh config.yaml llmgw-litellm.container   # every line ends in :0
-infosec$ for f in bin/images.tsv bin/pull-images.sh bin/link-quadlets.sh litellm/config.yaml litellm/llmgw-litellm.container; do echo "== $f"; sudo diff /opt/llm-gateway/$f /tmp/$(basename $f); done
+sysadmin$ cd /tmp && grep -c $'\r' llmgw-openwebui.container openwebui.env.example images.tsv pull-images.sh link-quadlets.sh config.yaml llmgw-litellm.container   # every line ends in :0
+sysadmin$ for f in bin/images.tsv bin/pull-images.sh bin/link-quadlets.sh litellm/config.yaml litellm/llmgw-litellm.container; do echo "== $f"; sudo diff /opt/llm-gateway/$f /tmp/$(basename $f); done
 ```
 
 Expected: `images.tsv` one comment line changed and one `openwebui` row added;
@@ -38,15 +38,15 @@ Install (directory modes as in docs/03 §3.3; the data directory is created here
 it is owned by `llmgw` before Podman first mounts it):
 
 ```bash
-infosec$ sudo install -d -m 750 -o llmgw -g llmgw /opt/llm-gateway/openwebui
-infosec$ sudo install -d -m 700 -o llmgw -g llmgw /opt/llm-gateway/openwebui/data
-infosec$ sudo install -m 640 -o llmgw -g llmgw /tmp/llmgw-openwebui.container /tmp/openwebui.env.example /opt/llm-gateway/openwebui/
-infosec$ sudo install -m 640 -o llmgw -g llmgw /tmp/images.tsv /opt/llm-gateway/bin/images.tsv
-infosec$ sudo install -m 750 -o llmgw -g llmgw /tmp/pull-images.sh /tmp/link-quadlets.sh /opt/llm-gateway/bin/
-infosec$ sudo install -m 644 -o llmgw -g llmgw /tmp/config.yaml /opt/llm-gateway/litellm/config.yaml
-infosec$ sudo install -m 644 -o llmgw -g llmgw /tmp/llmgw-litellm.container /opt/llm-gateway/litellm/llmgw-litellm.container
-infosec$ rm /tmp/llmgw-openwebui.container /tmp/openwebui.env.example /tmp/images.tsv /tmp/pull-images.sh /tmp/link-quadlets.sh /tmp/config.yaml /tmp/llmgw-litellm.container
-infosec$ ls -la /opt/llm-gateway/openwebui /opt/llm-gateway/bin; ls -laZ /opt/llm-gateway/openwebui/data
+sysadmin$ sudo install -d -m 750 -o llmgw -g llmgw /opt/llm-gateway/openwebui
+sysadmin$ sudo install -d -m 700 -o llmgw -g llmgw /opt/llm-gateway/openwebui/data
+sysadmin$ sudo install -m 640 -o llmgw -g llmgw /tmp/llmgw-openwebui.container /tmp/openwebui.env.example /opt/llm-gateway/openwebui/
+sysadmin$ sudo install -m 640 -o llmgw -g llmgw /tmp/images.tsv /opt/llm-gateway/bin/images.tsv
+sysadmin$ sudo install -m 750 -o llmgw -g llmgw /tmp/pull-images.sh /tmp/link-quadlets.sh /opt/llm-gateway/bin/
+sysadmin$ sudo install -m 644 -o llmgw -g llmgw /tmp/config.yaml /opt/llm-gateway/litellm/config.yaml
+sysadmin$ sudo install -m 644 -o llmgw -g llmgw /tmp/llmgw-litellm.container /opt/llm-gateway/litellm/llmgw-litellm.container
+sysadmin$ rm /tmp/llmgw-openwebui.container /tmp/openwebui.env.example /tmp/images.tsv /tmp/pull-images.sh /tmp/link-quadlets.sh /tmp/config.yaml /tmp/llmgw-litellm.container
+sysadmin$ ls -la /opt/llm-gateway/openwebui /opt/llm-gateway/bin; ls -laZ /opt/llm-gateway/openwebui/data
 ```
 
 ## 7.2 Pull the image (service account)
@@ -137,7 +137,7 @@ inside the image). The data directory was emptied before the restart (no account
 Second tunnel, in its own window, alongside the LiteLLM one:
 
 ```
-ssh -L 8080:127.0.0.1:8080 infosec@10.50.4.68
+ssh -L 8080:127.0.0.1:8080 sysadmin@192.0.2.10
 ```
 
 Then `http://127.0.0.1:8080/` in the browser. On an empty database the page offers to
@@ -150,8 +150,8 @@ Checks, in order:
 
 1. Model selector shows `gemini-2.5-flash` and nothing else (the key's model list;
    `mock-echo` is not in it).
-2. Send `Reply with exactly the text between the quotes: "Hello Dennis Yurichev"`.
-   Expected: the reply contains `Hello Dennis Yurichev`; the chat gets a title (one
+2. Send `Reply with exactly the text between the quotes: "Hello Jane Doe"`.
+   Expected: the reply contains `Hello Jane Doe`; the chat gets a title (one
    background call).
 3. Admin Panel, Users: note the admin's id (a UUID). On the server, the spend log carries
    it as `end_user`, the prompt and response columns hold the literal `{}` that LiteLLM
@@ -213,7 +213,7 @@ each becomes an entry in `DECISIONS.md` when it is acted on:
   it off while the free tier is in use.
 - The folded reasoning block shows the placeholders (`<CREDIT_CARD_1>`) and the answer
   text the restored values: LiteLLM restores the answer content only. Not a defect;
-  the users see how their prompt left the bank.
+  the users see how their prompt left the organisation.
 
 ## Results
 
@@ -234,9 +234,9 @@ same day, and to `gemini-2.5-flash` with `/key/update` once that key exists).
   `Loading SentenceTransformer model from /app/backend/data/cache/embedding/models/...`
   and no `ERROR`. The application logs in UTC (four hours behind the podman lines).
 - §7.6: onboarding page, admin account created (`admin`). Model selector shows
-  `mock-echo` only. Prompt `My name is Dennis Yurichev, e-mail dennis@example.com.
-  Summarise this.` returned `Mock reply. Restored placeholders: Dennis Yurichev
-  dennis@example.com`. Spend log: three rows (`test` message, its title generation
+  `mock-echo` only. Prompt `My name is Jane Doe, e-mail jane.doe@example.com.
+  Summarise this.` returned `Mock reply. Restored placeholders: Jane Doe
+  jane.doe@example.com`. Spend log: three rows (`test` message, its title generation
   80 ms later, the PII prompt), each with the admin's UUID in `end_user`, `{}` in both
   body columns, key `openwebui` at spend 0.
 - §7.6 check 5: sign out and log in again work, the login form offers no sign-up, chats
@@ -257,5 +257,5 @@ domain controller, so it needs the egress network and a rule for TCP 636 to the 
 controllers, a decision to record; the bind password goes into `openwebui.env`; the
 domain controllers' issuing CA goes on the server as a file for `LDAP_CA_CERT_FILE`
 with certificate validation on. Facts to collect: the controllers' names, the network
-path from 10.50.4.68 on 636, the bind account DN, the search base and gating group,
+path from 192.0.2.10 on 636, the bind account DN, the search base and gating group,
 `sAMAccountName` versus `userPrincipalName`, `mail` populated, and one test account.

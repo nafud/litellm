@@ -134,7 +134,7 @@ is accepted, but LiteLLM sets its `response_cost` to None (1.100.1 `litellm_logg
 Automatic updates are off (D-21). Once a month, or sooner for a critical erratum that
 Satellite flags for this host:
 
-1. Check what is due: Satellite (Hosts > Content Hosts > `xbbovsrlllm001` > Errata) or
+1. Check what is due: Satellite (Hosts > Content Hosts > `llmgw01` > Errata) or
    on the host `sudo dnf updateinfo --summary` and `sudo dnf -q check-update`.
 2. Take a VM snapshot.
 3. `sudo dnf upgrade`, read the transaction summary (kernel, selinux-policy, podman,

@@ -26,7 +26,7 @@ Readiness must report `"db": "connected"`. Result (2026-09-16): `{"status": "hea
 llmgw$ podman exec -i litellm python3 - <<'PY'
 import json, urllib.request
 req = urllib.request.Request("http://presidio-analyzer:3000/analyze",
-    data=json.dumps({"text": "My name is Dennis Yurichev, mail dennis@example.com", "language": "en"}).encode(),
+    data=json.dumps({"text": "My name is Jane Doe, mail jane.doe@example.com", "language": "en"}).encode(),
     headers={"Content-Type": "application/json"})
 print(json.dumps(json.load(urllib.request.urlopen(req, timeout=30)), indent=1))
 PY
@@ -43,7 +43,7 @@ in `pii_entities_config`, so LiteLLM ignores it.
 ```bash
 curl -sS -X POST $BASE/guardrails/apply_guardrail \
   -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"guardrail_name":"presidio-pii","text":"My name is Dennis Yurichev, mail dennis@example.com, card 4111 1111 1111 1111"}'
+  -d '{"guardrail_name":"presidio-pii","text":"My name is Jane Doe, mail jane.doe@example.com, card 4111 1111 1111 1111"}'
 ```
 
 Expected `response_text`: `My name is <PERSON_1>, mail <EMAIL_ADDRESS_2>, card <CREDIT_CARD_3>`.
@@ -60,11 +60,11 @@ request:
 ```bash
 curl -sS $BASE/v1/chat/completions \
   -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"model":"mock-echo","messages":[{"role":"user","content":"I am Dennis Yurichev, dennis@example.com"}]}' \
+  -d '{"model":"mock-echo","messages":[{"role":"user","content":"I am Jane Doe, jane.doe@example.com"}]}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
 ```
 
-Expected: `Mock reply. Restored placeholders: Dennis Yurichev dennis@example.com`.
+Expected: `Mock reply. Restored placeholders: Jane Doe jane.doe@example.com`.
 
 Finding (2026-09-16, first run): the mock reply carried `<EMAIL_ADDRESS_1>` while the
 request produced `<EMAIL_ADDRESS_2>` (numbering above), so only the person was
@@ -85,14 +85,14 @@ Streaming path (the restore logic is separate for streams):
 ```bash
 curl -sS -N $BASE/v1/chat/completions \
   -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"model":"mock-echo","stream":true,"messages":[{"role":"user","content":"I am Dennis Yurichev, dennis@example.com"}]}' \
+  -d '{"model":"mock-echo","stream":true,"messages":[{"role":"user","content":"I am Jane Doe, jane.doe@example.com"}]}' \
   | grep -o '"content":"[^"]*"' | tr -d '\n'; echo
 ```
 
-The concatenated content must again read `... Dennis Yurichev dennis@example.com`.
+The concatenated content must again read `... Jane Doe jane.doe@example.com`.
 
 Result (2026-09-16, after the scope fix, `LITELLM_LOG=INFO`): non-streaming and streaming
-both return `Mock reply. Restored placeholders: Dennis Yurichev dennis@example.com`. Pass.
+both return `Mock reply. Restored placeholders: Jane Doe jane.doe@example.com`. Pass.
 A request without PII returns the raw placeholders, as there is nothing to restore. The
 guardrail instance count is only visible at DEBUG (the `Checking if <... object at 0x...>`
 lines), so it was not re-counted at INFO; the source of 1.100.1
@@ -111,7 +111,7 @@ llmgw$ systemctl --user stop llmgw-presidio-analyzer.service
 llmgw$ systemctl --user is-active llmgw-litellm.service        # active
 curl -sS -o /dev/null -w 'HTTP %{http_code}\n' $BASE/v1/chat/completions \
   -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"model":"mock-echo","messages":[{"role":"user","content":"I am Dennis Yurichev"}]}'
+  -d '{"model":"mock-echo","messages":[{"role":"user","content":"I am Jane Doe"}]}'
 llmgw$ systemctl --user start llmgw-presidio-analyzer.service
 ```
 
@@ -178,11 +178,11 @@ name `gemini-2.5-flash` (D-29). Phase 7 consists of:
      | python3 -c 'import sys,json; print(json.load(sys.stdin)["key"])')
    curl -sS $BASE/v1/chat/completions \
      -H "Authorization: Bearer $VKEY" -H "Content-Type: application/json" \
-     -d '{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"Reply with exactly the text between the quotes: \"Hello Dennis Yurichev\""}]}' \
+     -d '{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"Reply with exactly the text between the quotes: \"Hello Jane Doe\""}]}' \
      | python3 -c 'import sys,json; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
    ```
 
-   The reply must contain `Hello Dennis Yurichev` (restored), while the provider only
+   The reply must contain `Hello Jane Doe` (restored), while the provider only
    received `Hello <PERSON_1>`. From LiteLLM's side, the spend log row records which
    guardrail ran and how many entities were masked, without the prompt body:
 
@@ -235,11 +235,11 @@ Steps, same shape as 1 to 3 above:
    pause:
 
    ```bash
-   llmgw$ curl -sS $BASE/v1/chat/completions -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" -d '{"model":"nemotron-3-super","messages":[{"role":"user","content":"Reply with exactly the text between the quotes: \"Hello Dennis Yurichev\""}]}' | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r["model"], "|", r["choices"][0]["message"]["content"].strip())'
+   llmgw$ curl -sS $BASE/v1/chat/completions -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" -d '{"model":"nemotron-3-super","messages":[{"role":"user","content":"Reply with exactly the text between the quotes: \"Hello Jane Doe\""}]}' | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r["model"], "|", r["choices"][0]["message"]["content"].strip())'
    llmgw$ podman exec postgres psql -U litellm -d litellm -c "select model, model_group, spend, end_user, metadata->'applied_guardrails' as guardrails, metadata->'guardrail_information'->0->'masked_entity_count' as masked, messages::text = '{}' as no_prompt from \"LiteLLM_SpendLogs\" order by \"startTime\" desc limit 2;"
    ```
 
-   Expected: the reply contains `Hello Dennis Yurichev` (restored on the way back; the
+   Expected: the reply contains `Hello Jane Doe` (restored on the way back; the
    provider received `Hello <PERSON_1>`), `spend` is 0 (explicit pricing), `masked`
    shows `{"PERSON": 1}`, `no_prompt` is `t`.
 4. Point the front-end's key at the model. `/key/update` accepts the alias in 1.100.1
@@ -256,8 +256,8 @@ Steps, same shape as 1 to 3 above:
    `end_user` id and `nemotron-3-super`.
 
 Result 2026-09-17: all four steps pass with `nemotron-3-super`. Master-key reply
-`Hello Dennis Yurichev`, spend-log row `{"PERSON": 1}`, `no_prompt` `t`; key switched
-(`['nemotron-3-super'] openwebui`); browser reply "Hello Dennis Yurichev, it's great to
+`Hello Jane Doe`, spend-log row `{"PERSON": 1}`, `no_prompt` `t`; key switched
+(`['nemotron-3-super'] openwebui`); browser reply "Hello Jane Doe, it's great to
 meet you!" with the reasoning shown as a folded "Thought for less than a second" block.
 Two spend-log rows under the user's id per new chat, the answer with
 `{"PERSON": 1, "EMAIL_ADDRESS": 1}` and the title generation with one more LOCATION
@@ -290,7 +290,7 @@ products.
 ## 5.8 Admin UI
 
 `http://127.0.0.1:4000/ui` via an SSH tunnel from the workstation
-(`ssh -L 4000:127.0.0.1:4000 infosec@10.50.4.68`, kept open in its own window; the
+(`ssh -L 4000:127.0.0.1:4000 sysadmin@192.0.2.10`, kept open in its own window; the
 server's `AllowTcpForwarding` must permit local forwarding, `sudo sshd -T | grep -i
 allowtcpforwarding`). Login with `UI_USERNAME` / `UI_PASSWORD`. Confirm:
 
@@ -328,7 +328,7 @@ and `/key/info` on the alias answers 404 "Key not found in database". Phase 5 is
 
 All of 5.1 to 5.7 pass as described; 5.5 proves fail-closed. Then serve the client
 network: change `PublishPort=127.0.0.1:4000:4000` in
-`deploy/opt/litellm/llmgw-litellm.container` to `10.50.4.68:4000:4000`, commit, `scp`
+`deploy/opt/litellm/llmgw-litellm.container` to `192.0.2.10:4000:4000`, commit, `scp`
 the unit to the server and install it over `/opt/llm-gateway/litellm/llmgw-litellm.container`
 (owner `llmgw`), and
 
@@ -342,8 +342,8 @@ sudo firewall-cmd --reload && sudo firewall-cmd --list-rich-rules
 Plain HTTP on the LAN is acceptable only until TLS termination is in place (D-10).
 
 *Superseded 2026-09-17 (D-33):* port 4000 is not opened to a client subnet. When
-litellm.xalqbank.az goes live it is published for the WAF address only, like Open WebUI
+litellm.example.org goes live it is published for the WAF address only, like Open WebUI
 in docs/08, and the WAF exposes `/v1/` alone.
 
-*Updated 2026-09-18:* `litellm.xalqbank.az` goes live together with Open WebUI, on
+*Updated 2026-09-18:* `litellm.example.org` goes live together with Open WebUI, on
 request; the steps are docs/08 §8.1 (steps 13 to 19), §8.3 and §8.2 (run 2026-09-18), then §8.4.

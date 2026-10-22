@@ -46,7 +46,7 @@ model_list:
       api_key: "unused"
       # Placeholders are numbered by position across ALL entities in the request text
       # (verified in litellm 1.100.1 _finalize_presidio_anonymize_numbered_tokens): the
-      # validation prompt "I am Dennis Yurichev, dennis@example.com" yields <PERSON_1>
+      # validation prompt "I am Jane Doe, jane.doe@example.com" yields <PERSON_1>
       # and <EMAIL_ADDRESS_2>. A placeholder that has no mapping is left as-is.
       mock_response: "Mock reply. Restored placeholders: <PERSON_1> <EMAIL_ADDRESS_2>"
 

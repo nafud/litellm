@@ -9,7 +9,7 @@ Runtime rationale: D-11; image trust chain: D-13 and D-18.
 ## 3.0 Prerequisite: a package source on the server
 
 `dnf` currently has no repositories (`Not registered`). docs/01 §1.7 established that
-the company runs a Red Hat Satellite reached through `capsule.xalqbank.az`, that this
+the company runs a Red Hat Satellite reached through `capsule.example.org`, that this
 host was registered to it before (the capsule CA package, `redhat.repo`, `rhc` and
 `insights-client` are installed, and the January 2026 update came from it), and that
 direct registration with Red Hat is impossible here (the firewall decrypts TLS to the
@@ -19,7 +19,7 @@ Red Hat hosts, and `cdn.redhat.com` authenticates clients with certificates).
 after docs/02 §2.0 sets the hostname and `/etc/hosts` (the Satellite records the name
 the host reports at registration time). The Satellite administrator generates a
 "global registration" command in the Satellite UI (Hosts, Register Host): a `curl` of
-`https://satellite.xalqbank.az/register?...` with a bearer token valid for four hours,
+`https://satellite.example.org/register?...` with a bearer token valid for four hours,
 piped to `bash`. It carries the activation key, host group, location, organisation and
 operating system chosen by the administrator; `update_packages=false` leaves the
 update to docs/02 §2.4. The token is a secret: never in the repository or a chat log.
@@ -31,10 +31,10 @@ docs/01 §1.9), so the stale local identity is cleaned first (consumer certifica
 cached entitlements and facts, nothing else):
 
 ```bash
-getent hosts satellite.xalqbank.az
-curl -sS --cacert /etc/rhsm/ca/katello-server-ca.pem -o /dev/null -w 'satellite HTTP %{http_code}\n' --max-time 8 https://satellite.xalqbank.az/
+getent hosts satellite.example.org
+curl -sS --cacert /etc/rhsm/ca/katello-server-ca.pem -o /dev/null -w 'satellite HTTP %{http_code}\n' --max-time 8 https://satellite.example.org/
 sudo subscription-manager clean
-curl -sS --cacert /etc/rhsm/ca/katello-server-ca.pem -o /tmp/register.sh 'https://satellite.xalqbank.az/register?<parameters as generated>' --header 'Authorization: Bearer <token>'
+curl -sS --cacert /etc/rhsm/ca/katello-server-ca.pem -o /tmp/register.sh 'https://satellite.example.org/register?<parameters as generated>' --header 'Authorization: Bearer <token>'
 less /tmp/register.sh                     # what it does: installs the CA RPM, registers with the activation key, enables repositories
 sudo bash /tmp/register.sh && rm -f /tmp/register.sh
 ```
@@ -52,9 +52,9 @@ sudo subscription-manager repos --list-enabled | grep -E '^Repo ID'   # rhel-10-
 sudo dnf repolist && sudo dnf -q check-update | head -5
 ```
 
-If the capsule CA package were missing or stale (`rpm -qi katello-ca-consumer-capsule.xalqbank.az`
+If the capsule CA package were missing or stale (`rpm -qi katello-ca-consumer-capsule.example.org`
 shows its date), the Satellite owner re-issues it:
-`sudo dnf install http://capsule.xalqbank.az/pub/katello-ca-consumer-latest.noarch.rpm`
+`sudo dnf install http://capsule.example.org/pub/katello-ca-consumer-latest.noarch.rpm`
 (over HTTP by design, it carries the CA itself; then verify its RPM signature against
 the Satellite's key with the owner). Insights and `rhc` are the company's choice; they
 were installed with the capsule package and are not part of this deployment.
@@ -146,14 +146,14 @@ sudo chmod 700 /opt/llm-gateway/postgres /opt/llm-gateway/postgres/data /opt/llm
 
 No git client is installed on the workstation (D-24). The branch is downloaded from GitHub
 as a ZIP (Code → Download ZIP on the branch, or
-`https://github.com/nafud/litellm/archive/refs/heads/claude/zealous-lamport-kklwuf.zip`),
+`https://github.com/nafud/litellm/archive/refs/heads/<branch>.zip`),
 extracted, and the two directories are sent with the OpenSSH `scp` that ships with Windows.
 The archive is produced by `git archive`, which applies `.gitattributes`, so the files
 arrive with LF endings; the check on the server confirms it. From PowerShell in the
-extracted folder (`litellm-claude-zealous-lamport-kklwuf`):
+extracted folder (`litellm-<branch>`):
 
 ```powershell
-scp -r deploy/opt deploy/llmgw infosec@10.50.4.68:/tmp/
+scp -r deploy/opt deploy/llmgw sysadmin@192.0.2.10:/tmp/
 ```
 
 On the server, put the files in place with `llmgw` ownership. The copy must not carry
@@ -185,7 +185,7 @@ Repeating this after any change in the repository is the update path (docs/06): 
 the ZIP again, `scp`, CRLF check, the same `cp`, chmod, restart the affected unit.
 
 Result (2026-09-16): the first run used `cp -a`, which set `/opt/llm-gateway` to
-`infosec:infosec 700` and the four 750 subdirectories to 700, and the glob chmod failed
+`sysadmin:sysadmin 700` and the four 750 subdirectories to 700, and the glob chmod failed
 as described; files were all correct. Repaired with the §3.3 chown/chmod lines and the
 explicit chmod of the two scripts. The same `cp -a` also carried the `user_tmp_t` label
 of the `/tmp` tree onto `/opt/llm-gateway` (fixed with `restorecon -R`), and `.config`

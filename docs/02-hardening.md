@@ -4,7 +4,7 @@ Applied only after the phase 1 findings are reviewed. Apply items one at a time 
 verify each before the next; keep a second SSH session open while changing SSH, SELinux
 or firewall settings. The files referenced below live in `deploy/host/` in the
 repository and are copied to the server with `scp` (docs/03 §3.5 describes the copy;
-for this phase, `scp -r deploy/host infosec@10.50.4.68:/tmp/host` is enough).
+for this phase, `scp -r deploy/host sysadmin@192.0.2.10:/tmp/host` is enough).
 
 Order matters: SELinux first (it needs a reboot and a relabel), then SSH, then firewalls.
 
@@ -36,14 +36,14 @@ profile. Nothing on the host changes it.
 ## 2.0 Hostname
 
 The host is `localhost`. Satellite registration, the SIEM, Zabbix and the audit trail all
-need a stable name. Decided (docs/01 §1.14): `xbbovsrlllm001.xalqbank.az`. The name goes
+need a stable name. Decided (docs/01 §1.14): `llmgw01.example.org`. The name goes
 into `/etc/hosts` as well so that `hostname -f` resolves before the DNS team adds the
 A record (request that record now; nothing here waits for it):
 
 Step 1, the static name (the owner chose the short form; the domain comes from step 2):
 
 ```bash
-sudo hostnamectl set-hostname xbbovsrlllm001
+sudo hostnamectl set-hostname llmgw01
 hostnamectl --static
 ```
 
@@ -51,19 +51,19 @@ Step 2, the name and domain in `/etc/hosts`, so that `hostname -f` and the Satel
 the FQDN:
 
 ```bash
-echo '10.50.4.68 xbbovsrlllm001.xalqbank.az xbbovsrlllm001' | sudo tee -a /etc/hosts
-hostname -f; getent hosts xbbovsrlllm001
+echo '192.0.2.10 llmgw01.example.org llmgw01' | sudo tee -a /etc/hosts
+hostname -f; getent hosts llmgw01
 sudo ausearch -k system-locale -ts recent | grep -c sethostname     # the CIS audit rule recorded the change: 1 or more
 ```
 
-Expected: `hostnamectl --static` prints `xbbovsrlllm001`, `hostname -f` prints
-`xbbovsrlllm001.xalqbank.az`, and `getent` prints `10.50.4.68`. The shell prompt shows the new name at the next login;
+Expected: `hostnamectl --static` prints `llmgw01`, `hostname -f` prints
+`llmgw01.example.org`, and `getent` prints `192.0.2.10`. The shell prompt shows the new name at the next login;
 rsyslog and the journal use it immediately. The Zabbix agent's `Hostname=` line is not
-touched: passive checks from 10.100.7.150 do not use it.
+touched: passive checks from 198.51.100.150 do not use it.
 
 Then register to the Satellite: docs/03 §3.0, option A. Done 2026-09-15: identity under
-organisation `XALQ_BANK_OSJ`, environment `Library`, `rhsm.conf` pointing at
-`satellite.xalqbank.az`, BaseOS and AppStream enabled, about 300 updates pending. The
+organisation `<organisation>`, environment `Library`, `rhsm.conf` pointing at
+`satellite.example.org`, BaseOS and AppStream enabled, about 300 updates pending. The
 Satellite recorded the short host name (`subscription-manager` reports the kernel
 hostname); rename it in the Satellite UI if the convention there is FQDNs. Continue
 with §2.4.
@@ -129,7 +129,7 @@ After the reboot (the relabel of a 400 GB volume with little data takes a few mi
 
 ```bash
 getenforce                          # Permissive
-ls -Z /etc/passwd /opt /home/infosec                # labels instead of "?"
+ls -Z /etc/passwd /opt /home/sysadmin                # labels instead of "?"
 sudo ausearch -m AVC,USER_AVC -ts boot | tail -20   # denials since boot; expect none or only noise
 systemctl is-failed audit-rules.service; sudo auditctl -s | grep -E '^enabled'   # "inactive" (one-shot, exited cleanly; "failed" is the bad answer), enabled 2
 sudo /opt/traps/bin/cytool status | head -5          # XDR agent still healthy
@@ -147,9 +147,9 @@ as `usr_t`), no failed units, `audit-rules.service` exited cleanly with `enabled
   `active = yes`, `args = LOG_INFO LOG_LOCAL6`; supported path, no custom policy,
   messages tagged by the plugin instead of `tag_audit_log`), or a local policy module
   allowing `syslogd_t` read/watch on `auditd_log_t`. Recommendation: the plugin.
-- rsyslog cannot reach `linux-mon.xalqbank.az:514` (connection timed out, every two
+- rsyslog cannot reach `linux-mon.example.org:514` (connection timed out, every two
   minutes since boot; the plain `@@` action drops messages meanwhile). Nothing on the
-  host changed on that path; the SIEM team must allow 10.50.4.68 to the collector.
+  host changed on that path; the SIEM team must allow 192.0.2.10 to the collector.
   Whether it ever worked is unknown: the journal was volatile until today.
 
 Leave it permissive while phase 3 installs Podman and phase 4 starts the stack, checking
@@ -166,27 +166,27 @@ If something is denied later, read the denial rather than lowering the mode:
 
 ## 2.2 Accounts
 
-- Work from `infosec` (member of `wheel`); RHEL's default `%wheel ALL=(ALL) ALL` is enough,
+- Work from `sysadmin` (member of `wheel`); RHEL's default `%wheel ALL=(ALL) ALL` is enough,
   no `NOPASSWD`.
 - `devops`: the Ansible automation account (keys from `ansible-control` and
-  `xbbovsransb001`, `NOPASSWD:ALL`). It stays unless decided otherwise; firewalld limits
+  `ansible01`, `NOPASSWD:ALL`). It stays unless decided otherwise; firewalld limits
   where it can come from (§2.7). To remove SSH access instead, edit the `AllowUsers`
   line in `/etc/ssh/sshd_config` (that keyword accumulates across files, so a drop-in
   cannot narrow it) and lock the account: `sudo usermod -L -e 1 devops`.
-- `infosec` has logged in with a password only. Install a key first (§2.3).
+- `sysadmin` has logged in with a password only. Install a key first (§2.3).
 - The stack runs under `llmgw`, created in phase 3: no password, no `sudo`, not in
   `AllowUsers`, not in `wheel`. Podman has no daemon and no root-equivalent group.
 
 ## 2.3 SSH
 
-Install a key for `infosec` and confirm key login works before turning password login
+Install a key for `sysadmin` and confirm key login works before turning password login
 off. The workstation is Windows; its OpenSSH client has no `ssh-copy-id`, so the public
 key is appended by hand (PowerShell):
 
 ```powershell
 if (-not (Test-Path $env:USERPROFILE\.ssh\id_ed25519.pub)) { ssh-keygen -t ed25519 }
-type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh infosec@10.50.4.68 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-ssh -o PasswordAuthentication=no infosec@10.50.4.68 true; if ($LASTEXITCODE -eq 0) { "key login OK" }
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh sysadmin@192.0.2.10 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+ssh -o PasswordAuthentication=no sysadmin@192.0.2.10 true; if ($LASTEXITCODE -eq 0) { "key login OK" }
 ```
 
 Protect the private key with a passphrase when `ssh-keygen` asks; it is now the only
@@ -206,7 +206,7 @@ sudo sshd -T | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractive
 
 Expected: `passwordauthentication no`, `kbdinteractiveauthentication no`,
 `x11forwarding no`, `allowagentforwarding no`, `allowtcpforwarding local`,
-`maxauthtries 4` (CIS value, kept), `allowusers devops infosec`.
+`maxauthtries 4` (CIS value, kept), `allowusers devops sysadmin`.
 
 Open a **new** session to confirm before closing the old one. `AllowTcpForwarding local`
 stays on because the admin UI is reached through `ssh -L 4000:127.0.0.1:4000` until TLS
@@ -284,12 +284,12 @@ identity unchanged, all five services active, `Leap status : Normal`.
 Order on the host: rsyslog, journal, then the audit rules of §2.1 and the reboot.
 
 - `timedatectl` shows `System clock synchronized: yes` (chronyd is active, sources
-  ntp2/ntp3.xalqbank.az, `Leap status : Normal` after the kernel reboot).
+  ntp2/ntp.example.org, `Leap status : Normal` after the kernel reboot).
 - **rsyslog. Finding (2026-09-15):** `/etc/rsyslog.conf` ships `audit.log` to the SIEM
   with the legacy `$InputFile*` directives but never loads `imfile`, so rsyslog has
   rejected that block since it was written ("invalid or yet-unknown config file
   command"); `/var/lib/rsyslog/` holds only `imjournal.state`, never the `audit_log`
-  state file. Syslog reached `linux-mon.xalqbank.az` all along, the audit trail did not.
+  state file. Syslog reached `linux-mon.example.org` all along, the audit trail did not.
   The same file runs the unused receiver on 514 (`$ModLoad imtcp`,
   `$InputTCPServerRun 514`, listening on all addresses). The file is not managed by
   Ansible (docs/01 §1.8). Fix: drop the eight legacy lines, add the input in current
@@ -392,7 +392,7 @@ sudo firewall-cmd --permanent --zone=public --remove-service=dhcpv6-client
 sudo firewall-cmd --permanent --zone=public --remove-service=ssh
 sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="<admin-cidr>" service name="ssh" accept'
 sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="<ansible-cidr>" service name="ssh" accept'
-sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.100.7.150/32" port port="10050" protocol="tcp" accept'
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="198.51.100.150/32" port port="10050" protocol="tcp" accept'
 # only if rsyslog 514 is a deliberate receiver:
 # sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="<log-source-cidr>" port port="514" protocol="tcp" accept'
 sudo firewall-cmd --reload && sudo firewall-cmd --list-all
@@ -404,7 +404,7 @@ below and the removal of the `ssh` service are applied when they are. The Zabbix
 is part of §8.3 so that enabling firewalld does not break monitoring.
 
 `<admin-cidr>` and `<ansible-cidr>` come from docs/01 question 5 (logins seen from
-10.240.234.19 and 10.50.12.2 for `infosec`, 10.100.8.50 and 10.100.7.60 for `devops`).
+198.51.100.19 and 198.51.100.2 for `sysadmin`, 198.51.100.50 and 198.51.100.60 for `devops`).
 The Cortex XDR agent on 33221 gets no rule unless its administrators say it needs one
 (docs/01 §1.8 block D shows whether it even binds a non-loopback address). Port 4000 is
 not opened in this phase: LiteLLM listens on `127.0.0.1` until validation is complete
@@ -415,7 +415,7 @@ not opened in this phase: LiteLLM listens on `127.0.0.1` until validation is com
 Rootless Podman sends all container traffic through `pasta`, a process owned by `llmgw`,
 so the host can attribute every outbound packet of the stack to that uid. The ruleset
 in `deploy/host/llmgw-egress.nft` allows `llmgw` only established traffic, loopback, DNS
-to 10.100.0.1/10.100.0.2 and TCP 443; everything else from that uid is logged and
+to 198.51.100.53/198.51.100.54 and TCP 443; everything else from that uid is logged and
 dropped. It is a separate nftables table that coexists with firewalld (which manages
 only its own table). Apply it **after** phase 3 has created the `llmgw` user (nft
 resolves the name at load time):
@@ -434,7 +434,7 @@ service account, and therefore every container, can reach only TCP 443 (plus DNS
 the two resolvers). Root keeps unrestricted egress for `dnf`, registration and the image
 pulls of docs/03 §3.7 run as `llmgw`, which is TCP 443 as well. Once the provider is
 chosen (D-19), the `tcp dport 443 accept` rule can be narrowed to a named set of the
-provider's addresses, or the network firewall can restrict `10.50.4.68` to those hosts;
+provider's addresses, or the network firewall can restrict `192.0.2.10` to those hosts;
 neither is needed to bring the stack up.
 
 ## 2.9 Verification

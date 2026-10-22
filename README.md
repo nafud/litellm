@@ -9,6 +9,14 @@ that runs on the server, the scripts used to assess and verify it, and the recor
 every security decision. Work is done phase by phase; each phase has a document in
 `docs/` and is only started once the previous one is verified.
 
+**Published copy.** The names and addresses in this repository are placeholders. The
+organisation's domain is written as `example.org`, hosts carry generic names (`llmgw01`,
+`ansible01`), the server and its neighbours sit in the documentation ranges of RFC 5737
+(`192.0.2.0/24` for the gateway network, `198.51.100.0/24` for the admin, automation and
+monitoring hosts), the administrator account is `sysadmin`, and the person named in the
+masking demonstrations is fictitious. Every measurement, hash, error message and decision
+is recorded as it happened; only the identifiers were substituted.
+
 ## Architecture
 
 ```mermaid
@@ -28,24 +36,24 @@ flowchart LR
     owui --> pg
     owui -- "http://litellm:4000/v1" --> litellm
   end
-  waf["FortiWeb WAF<br/>aiproxy.xalqbank.az<br/>litellm.xalqbank.az (/v1 only)<br/>certificate, TLS ends here"]
+  waf["FortiWeb WAF<br/>aiproxy.example.org<br/>litellm.example.org (/v1 only)<br/>certificate, TLS ends here"]
   fw["Egress firewall<br/>allow api.* from gateway host only"]
   prov["Provider APIs<br/>api.anthropic.com<br/>api.openai.com<br/>Gemini API<br/>(see placeholders only)"]
   ui -- "https" --> waf
-  waf -- "http 10.50.4.68:8080<br/>from the WAF only (firewalld)" --> owui
-  dev -- "https://litellm.xalqbank.az/v1" --> waf
-  waf -- "http 10.50.4.68:8443, /v1 paths<br/>from the WAF only (firewalld)" --> litellm
+  waf -- "http 192.0.2.10:8080<br/>from the WAF only (firewalld)" --> owui
+  dev -- "https://litellm.example.org/v1" --> waf
+  waf -- "http 192.0.2.10:8443, /v1 paths<br/>from the WAF only (firewalld)" --> litellm
   litellm --> fw --> prov
 ```
 
-Prompt content at each hop, for the input `"Dennis Yurichev"`:
+Prompt content at each hop, for the input `"Jane Doe"`:
 
 | Hop | Content |
 |-----|---------|
-| client to LiteLLM | `Dennis Yurichev` (raw) |
+| client to LiteLLM | `Jane Doe` (raw) |
 | LiteLLM to provider | `<PERSON_1>` (masked) |
 | provider to LiteLLM | `<PERSON_1>` (provider only ever sees the tag) |
-| LiteLLM to client | `Dennis Yurichev` (restored) |
+| LiteLLM to client | `Jane Doe` (restored) |
 
 ## Components and pinned versions
 
@@ -81,7 +89,7 @@ older tutorials still reference the Microsoft registry.
 | 6 | Operations: backups, updates, rotation | `docs/06-operations.md` | procedures written; **next**: first dump with restore test (§6.1) and routine checks (§6.2); schedule and off-host copy wait for D-28 |
 | 7 | Provider choice, key, real round trip | `docs/05-validation.md` §5.7 | Gemini chosen 2026-09-16 (D-29), key not yet obtained; OpenRouter free tier as testing provider (`nemotron-3-super`) since 2026-09-17, round trip through the browser verified (D-31, §5.7a); Gemini steps wait for the key |
 | 8 | Open WebUI for the users | `docs/07-openwebui.md`, `deploy/opt/openwebui/` | deployed 2026-09-17 (D-30, D-32), masking round trip through the browser verified; on `nemotron-3-super` since §5.7a; exposure is phase 9 |
-| 9 | Exposure through the FortiWeb WAF: `aiproxy.xalqbank.az`, `litellm.xalqbank.az`, firewalld | `docs/08-exposure.md` | written 2026-09-17, WAF procedure verified against the FortiWeb guides and the LiteLLM name added on request 2026-09-18 (D-33); §8.3 and §8.2 run 2026-09-18 (firewalld up, both front-ends published on the host address, reachable from the WAF address only); the path from the WAF to the server passes 443, 8080 and 8443 only, so LiteLLM is published on host port 8443 (D-33 amendment 3); Open WebUI WAF objects built and verified by curl through the VIP 2026-09-18; FORWARDED_ALLOW_IPS corrected to the backend subnet (rootlessport peer, D-33 amendment 4), installed and proven the same day; DNS records created 2026-09-21; the browser's `500: Internal Error` traced to the WAF's zstd handling and closed by `ENABLE_COMPRESSION_MIDDLEWARE=false` (D-33 amendment 5), login page loads through the WAF; **open**: §8.4 login and name test, §8.6 change request to the WAF administrator (X-Forwarded-For rule, `chunk-encoding enable`, zstd report, dedicated `sp-openwebui`, HSTS), the LiteLLM WAF objects (§8.1 steps 13 to 19) and its A record |
+| 9 | Exposure through the FortiWeb WAF: `aiproxy.example.org`, `litellm.example.org`, firewalld | `docs/08-exposure.md` | written 2026-09-17, WAF procedure verified against the FortiWeb guides and the LiteLLM name added on request 2026-09-18 (D-33); §8.3 and §8.2 run 2026-09-18 (firewalld up, both front-ends published on the host address, reachable from the WAF address only); the path from the WAF to the server passes 443, 8080 and 8443 only, so LiteLLM is published on host port 8443 (D-33 amendment 3); Open WebUI WAF objects built and verified by curl through the VIP 2026-09-18; FORWARDED_ALLOW_IPS corrected to the backend subnet (rootlessport peer, D-33 amendment 4), installed and proven the same day; DNS records created 2026-09-21; the browser's `500: Internal Error` traced to the WAF's zstd handling and closed by `ENABLE_COMPRESSION_MIDDLEWARE=false` (D-33 amendment 5), login page loads through the WAF; **open**: §8.4 login and name test, §8.6 change request to the WAF administrator (X-Forwarded-For rule, `chunk-encoding enable`, zstd report, dedicated `sp-openwebui`, HSTS), the LiteLLM WAF objects (§8.1 steps 13 to 19) and its A record |
 | later | SSH source ranges, egress policy, Active Directory login, signatures on the LiteLLM policy, front-end findings | `docs/08-exposure.md` §8.5, `docs/07-openwebui.md` §7.8, D-22 | open |
 
 **Project status, 2026-09-21 (owner decision):** closed as complete for the users' path.

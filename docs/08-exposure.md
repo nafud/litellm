@@ -1,24 +1,24 @@
-# Phase 9: Exposure through the WAF, aiproxy.xalqbank.az and litellm.xalqbank.az
+# Phase 9: Exposure through the WAF, aiproxy.example.org and litellm.example.org
 
 Until now both front-ends were reached through SSH tunnels. This phase puts them behind
-the bank's FortiWeb WAF: Open WebUI as `aiproxy.xalqbank.az` for the users, LiteLLM as
-`litellm.xalqbank.az` for developer tools with a virtual key each (D-33; the LiteLLM
+the organisation's FortiWeb WAF: Open WebUI as `aiproxy.example.org` for the users, LiteLLM as
+`litellm.example.org` for developer tools with a virtual key each (D-33; the LiteLLM
 name was added on request on 2026-09-18, docs/05 §5.10). The WAF is the reverse proxy:
 it holds the certificate, terminates the TLS and forwards to the server over plain HTTP
 on the WAF-to-server leg, which firewalld restricts to the WAF's address. For LiteLLM the
 WAF passes the inference paths only (`/v1/chat/completions`, `/v1/models`, ...); the
 admin UI and the management API stay on the SSH tunnel. Nothing new runs on the server.
 
-Addresses: server `10.50.4.68`; WAF address `10.50.4.100`, meaning the FortiWeb interface
+Addresses: server `192.0.2.10`; WAF address `192.0.2.100`, meaning the FortiWeb interface
 from which it opens the connections to the server (in Reverse Proxy mode the source of the
 server-side connection is a FortiWeb interface address, not the virtual IP the users
 reach). §8.3 checks this on the server.
 
 ```mermaid
 flowchart LR
-  subgraph user["User workstation (bank network)"]
-    browser["Browser<br/>https://aiproxy.xalqbank.az"]
-    dev["Developer tool<br/>https://litellm.xalqbank.az/v1<br/>virtual key"]
+  subgraph user["User workstation (corporate network)"]
+    browser["Browser<br/>https://aiproxy.example.org"]
+    dev["Developer tool<br/>https://litellm.example.org/v1<br/>virtual key"]
   end
   dns["Internal DNS<br/>one A record per name -> its WAF VIP<br/>(internal zone only)"]
   subgraph waf["FortiWeb WAF"]
@@ -26,11 +26,11 @@ flowchart LR
     rules["Server policies sp-openwebui, sp-litellm<br/>- Host header passed through<br/>- adds X-Forwarded-For = client's IP<br/>- chunk encoding on (streaming)<br/>- WebSocket passed through (socket proxy)<br/>- sp-litellm: /v1 inference paths only<br/>- request-body logging off"]
     vip --> rules
   end
-  subgraph host["Gateway host xbbovsrlllm001 (10.50.4.68)"]
-    fw["firewalld<br/>ports 8080 and 8443 accepted from 10.50.4.100 only<br/>SSH kept open until the admin ranges are known"]
+  subgraph host["Gateway host llmgw01 (192.0.2.10)"]
+    fw["firewalld<br/>ports 8080 and 8443 accepted from 192.0.2.100 only<br/>SSH kept open until the admin ranges are known"]
     subgraph podman["rootless Podman, user llmgw"]
-      owui["Open WebUI :8080 (published on 10.50.4.68)<br/>WEBUI_URL=https://aiproxy.xalqbank.az<br/>FORWARDED_ALLOW_IPS=10.89.0.0/24 (rootlessport peer)"]
-      litellm["LiteLLM :4000 (loopback; 10.50.4.68:8443 for the WAF)<br/>virtual key per developer<br/>use_x_forwarded_for"]
+      owui["Open WebUI :8080 (published on 192.0.2.10)<br/>WEBUI_URL=https://aiproxy.example.org<br/>FORWARDED_ALLOW_IPS=10.89.0.0/24 (rootlessport peer)"]
+      litellm["LiteLLM :4000 (loopback; 192.0.2.10:8443 for the WAF)<br/>virtual key per developer<br/>use_x_forwarded_for"]
       presidio["Presidio<br/>masks PII"]
       pg["PostgreSQL"]
       owui -- "http://litellm:4000/v1<br/>internal network" --> litellm
@@ -45,24 +45,24 @@ flowchart LR
   browser -. "1 name lookup" .-> dns
   browser == "2 HTTPS" ==> vip
   dev == "2 HTTPS" ==> vip
-  rules == "3 HTTP to 10.50.4.68:8080 / :8443" ==> fw
+  rules == "3 HTTP to 192.0.2.10:8080 / :8443" ==> fw
   litellm == "4 HTTPS, masked prompt" ==> provider
 ```
 
 Where the prompt exists unmasked: the WAF (TLS ends there), Open WebUI's chat history
-(D-30), LiteLLM before the Presidio call. Nothing outside the bank sees it.
+(D-30), LiteLLM before the Presidio call. Nothing outside the organisation sees it.
 
 ## 8.1 The WAF (FortiWeb web UI, then two CLI lines)
 
 Verified 2026-09-18 against the FortiWeb 7.6.7 Administration Guide and the 7.4.5 CLI
 Reference (Fortinet's PDFs; the object names and menu paths below are theirs). The
-firmware on the bank's unit is read from System > Status before starting; the 7.x
+firmware on the organisation's unit is read from System > Status before starting; the 7.x
 releases share these menus. Everything is built as separate objects first and tied
 together by the server policy last, which is the order the guide prescribes. Object
 names are proposals.
 
-What the objects give, in one list: TLS on 443 with the bank's certificate and chain,
-plain HTTP to `10.50.4.68:8080` with a `GET /health` check, the `Host` header passed
+What the objects give, in one list: TLS on 443 with the organisation's certificate and chain,
+plain HTTP to `192.0.2.10:8080` with a `GET /health` check, the `Host` header passed
 through, `X-Forwarded-For` and `X-Forwarded-Proto` set by the WAF alone, WebSocket
 passed through (FortiWeb "acts as a pure socket proxy for WebSocket traffic"), streamed
 answers forwarded chunk by chunk, 20 MB request bodies, no request-body logging.
@@ -71,7 +71,7 @@ answers forwarded chunk by chunk, 20 MB request bodies, no request-body logging.
 
 - A free address on the FortiWeb's client-facing subnet for the virtual IP (it must not
   be an interface address). The DNS A record points at it later.
-- The bank CA signs a server certificate for `aiproxy.xalqbank.az` from a CSR (step 7).
+- The internal CA signs a server certificate for `aiproxy.example.org` from a CSR (step 7).
 - Confirmation that the FortiWeb runs in Reverse Proxy mode (System > Config >
   Operation). It does if it already publishes other applications this way. Never change
   the mode for this project: switching deletes the policies of the old mode.
@@ -98,12 +98,12 @@ Load Balancing Algorithm Round Robin, Persistence none, OK. Server Balance with 
 member is chosen because the guide offers the health check (pool and member level)
 only for Server Balance pools; a Single Server pool has no health check and the Policy
 Status dashboard shows nothing for it. Then Create New member: Status Enable, Server
-Type IP, IP `10.50.4.68`, Port `8080`, SSL off, HTTP/2 off, Proxy Protocol off, Inherit
+Type IP, IP `192.0.2.10`, Port `8080`, SSL off, HTTP/2 off, Proxy Protocol off, Inherit
 Health Check on, Backup Server off, OK. The member shows down until §8.3 is done on the
 server; that is expected.
 
 **Step 5, protected hostname.** Server Objects > Protected Hostnames > Create New: Name
-`ph-openwebui`, Default Action Deny, OK; Create New entry: Host `aiproxy.xalqbank.az`,
+`ph-openwebui`, Default Action Deny, OK; Create New entry: Host `aiproxy.example.org`,
 Ignore Port off, Override Headers off, Action Accept, OK. Requests whose `Host` is not
 this name are rejected before reaching the server (the attack log then shows
 `HTTP Host Violation`).
@@ -118,18 +118,18 @@ WAF directly, nothing applies NAT in front of it), OK. The rule takes effect onl
 selected in the protection profile (step 9).
 
 **Step 7, certificate.** Server Objects > Certificates > Local > Generate: Certification
-Name `aiproxy.xalqbank.az`, ID Type Domain Name, Domain Name `aiproxy.xalqbank.az`,
-Organization and Country as the bank's PKI requires, Subject Alternative Names
-`aiproxy.xalqbank.az` and `litellm.xalqbank.az` (one certificate serves both server
+Name `aiproxy.example.org`, ID Type Domain Name, Domain Name `aiproxy.example.org`,
+Organization and Country as the organisation's PKI requires, Subject Alternative Names
+`aiproxy.example.org` and `litellm.example.org` (one certificate serves both server
 policies and is renewed once), Key Type RSA, Key Size 2048 Bit, Digest Algorithm SHA256,
 Enrollment Method File Based, OK. Select the PENDING row, Download, and submit the
-`.csr` to the bank CA (server authentication). The private key stays on the WAF. When
+`.csr` to the internal CA (server authentication). The private key stays on the WAF. When
 the signed certificate (PEM) comes back: Local > Import, Type **Local Certificate**
 (the CSR was generated here, so no key file is asked), Certificate file = the signed
 certificate, OK; the row turns from PENDING to a certificate. If the issuing CA is an
 intermediate, upload its certificate (or one PEM file holding the whole chain in order,
 issuer first) under Server Objects > Certificates > Intermediate CA > Import > Local PC,
-then on the Intermediate CA Group tab create `ca-group-bank` and add it. If the PKI
+then on the Intermediate CA Group tab create `ca-group-corp` and add it. If the PKI
 team prefers to issue certificate and key themselves as a PKCS#12 file, Import with
 Type PKCS12 Certificate and its password instead of the CSR route.
 
@@ -158,8 +158,8 @@ Protection empty for now. Everything else as cloned.
   WAF's address, §8.3 depends on it); HTTP Service `HTTP` only if the redirect below is
   wanted; HTTPS Service `HTTPS`; HTTP/2 **off** (default; HTTP/2 bypasses the WebSocket
   services and is the setting behind the reported hangs of `text/event-stream`
-  responses); Certificate Type Local, Certificate `aiproxy.xalqbank.az`, Certificate
-  Intermediate Group `ca-group-bank` if created.
+  responses); Certificate Type Local, Certificate `aiproxy.example.org`, Certificate
+  Intermediate Group `ca-group-corp` if created.
 - Advanced SSL settings: Supported SSL Protocols TLS 1.2 and TLS 1.3 only; SSL/TLS
   Encryption Level High; Disable Client-Initiated SSL Renegotiation on; Add HSTS Header
   on with Max. Age 31536000 (the guide requires a web protection profile on the policy
@@ -187,8 +187,8 @@ show server-policy policy sp-openwebui
 `client-timeout`, `HTTP-header-timeout` and `tcp-recv-timeout` keep their default 0 (no
 timeout), so a long generation is not cut by the policy.
 
-**Step 12, checks on the WAF.** CLI `execute ping 10.50.4.68`, and after §8.3
-`execute telnettest 10.50.4.68:8080` prints `Connected`; the Policy Status dashboard
+**Step 12, checks on the WAF.** CLI `execute ping 192.0.2.10`, and after §8.3
+`execute telnettest 192.0.2.10:8080` prints `Connected`; the Policy Status dashboard
 shows the pool member up. Log & Report > Log Config > Other Log Settings: Enable Attack
 Log on, traffic log stays off (`config log traffic-log`, `status` and `packet-log`
 default to disable, nothing to change). Retain Packet Payload For: keep the defaults
@@ -205,7 +205,7 @@ WAF protections that matter for this application are the TLS termination, the ho
 restriction and the size limits; the signatures are a bonus to be tuned, not a reason to
 block the users' chats.
 
-**The second name, litellm.xalqbank.az (steps 13 to 19).** Same objects again with a
+**The second name, litellm.example.org (steps 13 to 19).** Same objects again with a
 second virtual IP, plus one URL access policy that reduces what the WAF forwards to the
 inference paths. Reused from the first name: the X-header rule `xff-openwebui`, the
 constraints profile `hpc-openwebui` (20 MB is more than any prompt needs) and the
@@ -223,13 +223,13 @@ health check uses it too.
 
 **Step 15, server pool.** Server Objects > Server > Server Pool > Create New > Create
 HTTP Server Pool `pool-litellm`, Server Balance, Server Health Check `hc-litellm`, Round
-Robin, no persistence; member IP `10.50.4.68`, Port `8443`, SSL off, HTTP/2 off, Inherit
+Robin, no persistence; member IP `192.0.2.10`, Port `8443`, SSL off, HTTP/2 off, Inherit
 Health Check on. Port 8443 carries plain HTTP here (SSL off is what makes that so): the
 path between the FortiWeb and the server passes 443, 8080 and 8443 only (Results), and
 of the two free ones 8443 needs no privileged-port change on the host.
 
 **Step 16, protected hostname.** Server Objects > Protected Hostnames > Create New
-`ph-litellm`, Default Action Deny; entry Host `litellm.xalqbank.az`, Action Accept.
+`ph-litellm`, Default Action Deny; entry Host `litellm.example.org`, Action Accept.
 
 **Step 17, URL access allowlist.** Web Protection > Access > URL Access, tab URL Access
 Rule, Create New `uar-litellm-allow`: Action Pass; then Create New for each condition,
@@ -267,10 +267,10 @@ added once the exceptions learned on `sp-openwebui` are known.
 **Monitor Mode off**: the guide states that Monitor Mode ignores the URL access actions,
 so with it on the allowlist would not be enforced and `/ui/` would be reachable. Then the
 same CLI lines as step 11 for `sp-litellm` (`set chunk-encoding enable`), and
-`execute telnettest 10.50.4.68:8443` after §8.3.
+`execute telnettest 192.0.2.10:8443` after §8.3.
 
-**DNS.** Two A records, `aiproxy.xalqbank.az` to the virtual IP of step 1 and
-`litellm.xalqbank.az` to the one of step 13, in the internal zone only, created after
+**DNS.** Two A records, `aiproxy.example.org` to the virtual IP of step 1 and
+`litellm.example.org` to the one of step 13, in the internal zone only, created after
 step 12 passes. The server's own address is not published under these names.
 
 ## 8.2 The units (workstation, then service account)
@@ -281,7 +281,7 @@ rich rules in place first there is no such window. The section numbers stay as t
 units and DECISIONS.md cite them.
 
 Open WebUI first. Three lines changed in `deploy/opt/openwebui/llmgw-openwebui.container`:
-`PublishPort=10.50.4.68:8080:8080`, `WEBUI_URL=https://aiproxy.xalqbank.az`, and two
+`PublishPort=192.0.2.10:8080:8080`, `WEBUI_URL=https://aiproxy.example.org`, and two
 new variables `FORWARDED_ALLOW_IPS=10.89.0.0/24` (see the Results entry of 2026-09-18 on
 rootlessport: the first version named the WAF address and never matched) and
 `WEBUI_SESSION_COOKIE_SECURE=true`
@@ -291,8 +291,8 @@ inheritance, the auth cookie). Transfer the file with the branch ZIP and `scp`
 (docs/03 §3.4) and check it on the server:
 
 ```bash
-infosec$ grep -c $'\r' /tmp/llmgw-openwebui.container; sudo diff /opt/llm-gateway/openwebui/llmgw-openwebui.container /tmp/llmgw-openwebui.container
-infosec$ sudo install -m 644 -o llmgw -g llmgw /tmp/llmgw-openwebui.container /opt/llm-gateway/openwebui/llmgw-openwebui.container && rm /tmp/llmgw-openwebui.container
+sysadmin$ grep -c $'\r' /tmp/llmgw-openwebui.container; sudo diff /opt/llm-gateway/openwebui/llmgw-openwebui.container /tmp/llmgw-openwebui.container
+sysadmin$ sudo install -m 644 -o llmgw -g llmgw /tmp/llmgw-openwebui.container /opt/llm-gateway/openwebui/llmgw-openwebui.container && rm /tmp/llmgw-openwebui.container
 ```
 
 CRLF count 0; the diff shows the `PublishPort=`, `WEBUI_URL=` lines, the two new
@@ -305,8 +305,8 @@ llmgw$ podman ps --format '{{.Names}}\t{{.Status}}'
 llmgw$ podman port openwebui
 ```
 
-All five containers healthy; `podman port` shows `8080/tcp -> 10.50.4.68:8080`. From the
-admin account, `sudo ss -tlnp | grep ':8080 '` shows the socket on 10.50.4.68, no longer
+All five containers healthy; `podman port` shows `8080/tcp -> 192.0.2.10:8080`. From the
+admin account, `sudo ss -tlnp | grep ':8080 '` shows the socket on 192.0.2.10, no longer
 on 127.0.0.1. The SSH tunnel to 8080 stops working at this point; the LiteLLM tunnel to
 4000 is unaffected.
 
@@ -318,9 +318,9 @@ prints the line; the two workstation curls of §8.4 step 0 print `200 1030641` e
 browser with an empty cache (Ctrl+F5, or a private window) shows the login page.
 
 Then LiteLLM: two files. `deploy/opt/litellm/llmgw-litellm.container` gains a second
-`PublishPort=10.50.4.68:8443:4000` line next to the loopback one (Quadlet accepts the
+`PublishPort=192.0.2.10:8443:4000` line next to the loopback one (Quadlet accepts the
 key several times; the dry-run renders `--publish 127.0.0.1:4000:4000 --publish
-10.50.4.68:8443:4000`), so the admin tunnel of docs/05 §5.8 keeps working unchanged.
+192.0.2.10:8443:4000`), so the admin tunnel of docs/05 §5.8 keeps working unchanged.
 The host port is 8443 and not 4000 because the path from the WAF passes 443, 8080 and
 8443 only (Results); the first run of this section used 4000 and was corrected.
 `deploy/opt/litellm/config.yaml` gains `use_x_forwarded_for: true` under
@@ -329,9 +329,9 @@ in `LiteLLM_SpendLogs`, docs/06 §6.7) becomes the `X-Forwarded-For` value, whic
 writes and only the WAF can deliver. Same transfer and check:
 
 ```bash
-infosec$ grep -c $'\r' /tmp/llmgw-litellm.container /tmp/config.yaml
-infosec$ sudo diff /opt/llm-gateway/litellm/llmgw-litellm.container /tmp/llmgw-litellm.container; sudo diff /opt/llm-gateway/litellm/config.yaml /tmp/config.yaml
-infosec$ sudo install -m 644 -o llmgw -g llmgw /tmp/llmgw-litellm.container /opt/llm-gateway/litellm/llmgw-litellm.container && sudo install -m 644 -o llmgw -g llmgw /tmp/config.yaml /opt/llm-gateway/litellm/config.yaml && rm /tmp/llmgw-litellm.container /tmp/config.yaml
+sysadmin$ grep -c $'\r' /tmp/llmgw-litellm.container /tmp/config.yaml
+sysadmin$ sudo diff /opt/llm-gateway/litellm/llmgw-litellm.container /tmp/llmgw-litellm.container; sudo diff /opt/llm-gateway/litellm/config.yaml /tmp/config.yaml
+sysadmin$ sudo install -m 644 -o llmgw -g llmgw /tmp/llmgw-litellm.container /opt/llm-gateway/litellm/llmgw-litellm.container && sudo install -m 644 -o llmgw -g llmgw /tmp/config.yaml /opt/llm-gateway/litellm/config.yaml && rm /tmp/llmgw-litellm.container /tmp/config.yaml
 ```
 
 Counts 0 and 0; the unit diff shows the header line, the `PublishPort` comment and the
@@ -346,7 +346,7 @@ llmgw$ podman port litellm
 
 Restarting LiteLLM restarts Open WebUI's upstream only; Open WebUI itself stays up. All
 five healthy; `podman port litellm` prints two lines, `4000/tcp -> 127.0.0.1:4000` and
-`4000/tcp -> 10.50.4.68:8443`; `sudo ss -tlnp | grep -E ':(4000|8443) '` shows both sockets.
+`4000/tcp -> 192.0.2.10:8443`; `sudo ss -tlnp | grep -E ':(4000|8443) '` shows both sockets.
 
 ## 8.3 firewalld (admin account, before §8.2)
 
@@ -364,26 +364,26 @@ sudo systemctl enable --now firewalld
 sudo firewall-cmd --get-default-zone                    # public
 sudo firewall-cmd --permanent --zone=public --remove-service=cockpit
 sudo firewall-cmd --permanent --zone=public --remove-service=dhcpv6-client
-sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.100.7.150/32" port port="10050" protocol="tcp" accept'
-sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.50.4.100/32" port port="8080" protocol="tcp" accept'
-sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="10.50.4.100/32" port port="8443" protocol="tcp" accept'
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="198.51.100.150/32" port port="10050" protocol="tcp" accept'
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="192.0.2.100/32" port port="8080" protocol="tcp" accept'
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="192.0.2.100/32" port port="8443" protocol="tcp" accept'
 sudo firewall-cmd --reload && sudo firewall-cmd --list-all
 ```
 
 `--list-all` shows `services: ssh`, the three rich rules, no `ports:`. The rule does not
 affect traffic the host sends to itself (firewalld accepts the loopback interface), so
-`curl -sS http://10.50.4.68:8080/health` from the server still answers; the test of the
+`curl -sS http://192.0.2.10:8080/health` from the server still answers; the test of the
 rule is from the workstation:
 
 ```
-curl.exe -sS -m 5 http://10.50.4.68:8080/health
-curl.exe -sS -m 5 http://10.50.4.68:8443/health/liveliness
+curl.exe -sS -m 5 http://192.0.2.10:8080/health
+curl.exe -sS -m 5 http://192.0.2.10:8443/health/liveliness
 ```
 
 both must fail (the `public` zone rejects with "No route to host" or times out), while the
 WAF's health checks turn the pool members up once §8.1 steps 4 and 15 are in place.
 
-If the member stays down, the WAF is not connecting from 10.50.4.100. firewalld can say
+If the member stays down, the WAF is not connecting from 192.0.2.100. firewalld can say
 which address it is: enable the denied-packet log, wait one health check interval,
 read the kernel log, then switch the log off again:
 
@@ -394,7 +394,7 @@ sudo firewall-cmd --set-log-denied=off
 ```
 
 The `SRC=` field of a logged line is the FortiWeb interface address actually used; if
-it differs from 10.50.4.100, the rich rule and `FORWARDED_ALLOW_IPS` in the unit (§8.2)
+it differs from 192.0.2.100, the rich rule and `FORWARDED_ALLOW_IPS` in the unit (§8.2)
 are corrected to that address, not the other way round.
 
 ## 8.4 Round trip (workstation, browser)
@@ -446,8 +446,8 @@ Headers, Response Headers):
   encoding from the workstation's command prompt:
 
   ```
-  curl.exe -sS -o NUL -w "%{http_code} %{size_download}\n" -H "Accept-Encoding: zstd" https://aiproxy.xalqbank.az/_app/immutable/nodes/2.CzaW3MwC.js
-  curl.exe -sS -o NUL -w "%{http_code} %{size_download}\n" -H "Accept-Encoding: gzip" https://aiproxy.xalqbank.az/_app/immutable/nodes/2.CzaW3MwC.js
+  curl.exe -sS -o NUL -w "%{http_code} %{size_download}\n" -H "Accept-Encoding: zstd" https://aiproxy.example.org/_app/immutable/nodes/2.CzaW3MwC.js
+  curl.exe -sS -o NUL -w "%{http_code} %{size_download}\n" -H "Accept-Encoding: gzip" https://aiproxy.example.org/_app/immutable/nodes/2.CzaW3MwC.js
   ```
 
   Both print `200 1030641`, the file's size, with no `content-encoding` in the headers
@@ -461,14 +461,14 @@ llmgw$ podman ps --format '{{.Names}}\t{{.Status}}'; podman port openwebui
 llmgw$ podman inspect openwebui --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -vE '^(WEBUI_SECRET_KEY|DATABASE_URL|OPENAI_API_KEY)=' | sort
 llmgw$ stat -c '%U:%G %a %n' /opt/llm-gateway/openwebui/openwebui.env /opt/llm-gateway/openwebui/data
 llmgw$ grep -c $'\r' /opt/llm-gateway/openwebui/openwebui.env; grep -cE '^(WEBUI_SECRET_KEY|DATABASE_URL|OPENAI_API_KEY)=' /opt/llm-gateway/openwebui/openwebui.env; grep -c REPLACE /opt/llm-gateway/openwebui/openwebui.env
-llmgw$ H='Host: aiproxy.xalqbank.az'; P='X-Forwarded-Proto: https'
-llmgw$ curl -sS -D - -o /dev/null -H "$H" -H "$P" http://10.50.4.68:8080/ | head -4
-llmgw$ curl -sS -o /dev/null -w '%{http_code}\n' -H "$H" -H "$P" http://10.50.4.68:8080/api/config
-llmgw$ curl -sS -o /dev/null -w '%{http_code}\n' -H "$H" -H "$P" -H 'Content-Type: application/json' -X POST -d '{"email":"nobody@example.com","password":"wrong"}' http://10.50.4.68:8080/api/v1/auths/signin
-llmgw$ curl -s -i -m 3 -H "$H" -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' 'http://10.50.4.68:8080/ws/socket.io/?EIO=4&transport=websocket' 2>/dev/null | head -1
+llmgw$ H='Host: aiproxy.example.org'; P='X-Forwarded-Proto: https'
+llmgw$ curl -sS -D - -o /dev/null -H "$H" -H "$P" http://192.0.2.10:8080/ | head -4
+llmgw$ curl -sS -o /dev/null -w '%{http_code}\n' -H "$H" -H "$P" http://192.0.2.10:8080/api/config
+llmgw$ curl -sS -o /dev/null -w '%{http_code}\n' -H "$H" -H "$P" -H 'Content-Type: application/json' -X POST -d '{"email":"nobody@example.com","password":"wrong"}' http://192.0.2.10:8080/api/v1/auths/signin
+llmgw$ curl -s -i -m 3 -H "$H" -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' 'http://192.0.2.10:8080/ws/socket.io/?EIO=4&transport=websocket' 2>/dev/null | head -1
 ```
 
-Expected: five `healthy`, `8080/tcp -> 10.50.4.68:8080`; the environment listing shows
+Expected: five `healthy`, `8080/tcp -> 192.0.2.10:8080`; the environment listing shows
 the unit's 26 variables with the values of the unit file (25 until
 `ENABLE_COMPRESSION_MIDDLEWARE=false` was added on 2026-09-21) (the image adds its own, such
 as `SENTENCE_TRANSFORMERS_HOME`); `llmgw:llmgw 600` and `llmgw:llmgw 700`; `0`, `3`, `0`;
@@ -479,11 +479,11 @@ answers 429 after repeats); `HTTP/1.1 101 Switching Protocols`. All of these pas
 server that is configured as the unit says; a browser 500 then has the WAF or the
 browser's own page as its sender, never this container.
 
-1. `https://aiproxy.xalqbank.az/` shows the login page with a valid certificate (the
+1. `https://aiproxy.example.org/` shows the login page with a valid certificate (the
    padlock names the WAF's CA), no warning.
 2. Log in as the admin, send the docs/07 §7.6 name test; the answer streams token by
    token (`chunk-encoding enable`, §8.1 step 11) and the placeholders come back restored.
-3. Admin Panel, Settings, General shows the WebUI URL as `https://aiproxy.xalqbank.az`.
+3. Admin Panel, Settings, General shows the WebUI URL as `https://aiproxy.example.org`.
 4. On the server, the request arrived from the WAF, the user's address in the header:
 
    ```bash
@@ -502,11 +502,11 @@ written in Notepad, never on the command line: `hdr.txt` with the single line
 `Authorization: Bearer <the docs/05 test key, which has mock-echo>`; delete the file afterwards.
 
 ```
-curl.exe -sS https://litellm.xalqbank.az/health/liveliness
-curl.exe -sS -o NUL -w "%{http_code}\n" https://litellm.xalqbank.az/ui/
-curl.exe -sS -o NUL -w "%{http_code}\n" https://litellm.xalqbank.az/key/info
-curl.exe -sS https://litellm.xalqbank.az/v1/models -H @hdr.txt
-curl.exe -sS -N https://litellm.xalqbank.az/v1/chat/completions -H @hdr.txt -H "Content-Type: application/json" -d "{\"model\":\"mock-echo\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Dennis Yurichev, card 5555 5555 5555 4444\"}]}"
+curl.exe -sS https://litellm.example.org/health/liveliness
+curl.exe -sS -o NUL -w "%{http_code}\n" https://litellm.example.org/ui/
+curl.exe -sS -o NUL -w "%{http_code}\n" https://litellm.example.org/key/info
+curl.exe -sS https://litellm.example.org/v1/models -H @hdr.txt
+curl.exe -sS -N https://litellm.example.org/v1/chat/completions -H @hdr.txt -H "Content-Type: application/json" -d "{\"model\":\"mock-echo\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Jane Doe, card 5555 5555 5555 4444\"}]}"
 del hdr.txt
 ```
 
@@ -529,7 +529,7 @@ WebUI show the container network address of Open WebUI, as before.
   keeps its tunnel (docs/05 §5.8).
 
 - Developer keys are issued per person as in docs/06 §6.6; the base URL handed out is
-  `https://litellm.xalqbank.az/v1`. Until the Gemini key exists, every key shares the
+  `https://litellm.example.org/v1`. Until the Gemini key exists, every key shares the
   free tier's 50 requests per day (D-31), so one coding assistant can exhaust it.
 
 Next, in this order: the SSH rich rules once the admin ranges are known (docs/02 §2.7),
@@ -542,7 +542,7 @@ Written after the 2026-09-21 Results. Everything the server can do for these thr
 items is done and verified; each one is a setting only the FortiWeb holds.
 
 **1. The client address.** Open WebUI logs the container's own address (`10.89.0.19`)
-for every request, and LiteLLM will store the same for `litellm.xalqbank.az`. The
+for every request, and LiteLLM will store the same for `litellm.example.org`. The
 server is correct: uvicorn 0.51.0 (the version in the v0.11.3 image) parses
 `FORWARDED_ALLOW_IPS=10.89.0.0/24` as a network, the peer it sees is inside it, and it
 rewrites the client address from `X-Forwarded-For` before the access line is written
@@ -552,9 +552,9 @@ discards (empty, or the address in `X-Real-IP` instead), leaves the container's
 address in the log; both are cured by the same rule. Ask: the X-header rule of §8.1
 step 6 (`xff-openwebui`: Add X-Forwarded-For on, Add X-Forwarded-Proto on, Delete
 Previous XFF Headers on, Use X-Header to Identify Original Client's IP off) selected in
-the inline protection profile of the policy that serves `aiproxy.xalqbank.az`. Client
+the inline protection profile of the policy that serves `aiproxy.example.org`. Client
 Real IP stays off on the policy (§8.1 step 10): the WAF must keep connecting from
-`10.50.4.100`, which firewalld pins. Verification, on the server:
+`192.0.2.100`, which firewalld pins. Verification, on the server:
 `sudo journalctl _SYSTEMD_USER_UNIT=llmgw-openwebui.service --since -5m | grep -E '"(GET|POST) ' | tail -3`
 names the workstation's address after one reload in the browser.
 
@@ -577,7 +577,7 @@ Administration Guide (server policy, HTTP Content Routing) lets each entry carry
 own Web Protection Profile when Inherit Web Protection Profile is off (CLI
 `profile-inherit disable` in `HTTP-content-routing-list`). Item 1 therefore needs no
 dedicated policy: a clone of the policy's profile as `wpp-openwebui` with
-`xff-openwebui` selected, set on the `10.50.4.68_8080` entry alone; every other entry
+`xff-openwebui` selected, set on the `192.0.2.10_8080` entry alone; every other entry
 keeps the inherited profile. Item 2, `chunk-encoding`, is a setting of the server
 policy and applies to every entry on it: it forwards chunked responses as chunks
 instead of re-framing them with a `Content-Length`, HTTP/1.1 baseline behaviour that
@@ -596,20 +596,20 @@ count 0 each); `sudo diff` showed the planned lines plus two comment-only hunks 
 earlier commits that had never been installed (the health-check comment in the Open WebUI
 unit, the UI-directory comment in the LiteLLM unit). firewalld 2.4.3-4.el10_2 was
 enabled first: zone `public` active on `ens33`, `services: ssh`, no ports, the three
-rich rules (10050 from 10.100.7.150, 8080 and 4000 from 10.50.4.100). Then the installs
+rich rules (10050 from 198.51.100.150, 8080 and 4000 from 192.0.2.100). Then the installs
 (mode 644, owner `llmgw`), `daemon-reload`, `restart llmgw-litellm.service`, and once
 LiteLLM was healthy `restart llmgw-openwebui.service`; all five containers healthy.
-`podman port` prints `4000/tcp -> 127.0.0.1:4000`, `4000/tcp -> 10.50.4.68:4000` and
-`8080/tcp -> 10.50.4.68:8080`; `ss -tlnp` shows the same three sockets, all owned by
+`podman port` prints `4000/tcp -> 127.0.0.1:4000`, `4000/tcp -> 192.0.2.10:4000` and
+`8080/tcp -> 192.0.2.10:8080`; `ss -tlnp` shows the same three sockets, all owned by
 `rootlessport`. From the host, `/health` answers `{"status":true}` and
 `/health/liveliness` answers `"I'm alive!"`; from the workstation both requests time out
 after 5 s (firewalld). The SSH tunnel to 8080 is retired; the one to 4000 still works.
 
 **2026-09-18, WAF-to-server reachability.** From the FortiWeb CLI, `execute telnettest
-10.50.4.68:8080` connects and `execute telnettest 10.50.4.68:4000` times out, although
+192.0.2.10:8080` connects and `execute telnettest 192.0.2.10:4000` times out, although
 both ports have the same firewalld rich rule and both sockets answer from the host. To
 rule out the port number, a runtime-only rich rule for 8000 and a throwaway listener
-(`python3 -m http.server 8000 --bind 10.50.4.68`) were put up for one test: 8000 times
+(`python3 -m http.server 8000 --bind 192.0.2.10`) were put up for one test: 8000 times
 out the same way; rule and listener removed, the three permanent rules confirmed. So a
 device on the path between the FortiWeb and the server permits 8080 only; the server
 side is not involved (a firewalld rejection would need a different source address, and
@@ -623,14 +623,14 @@ unit, the §8.3 rule (8443 in place of 4000) and step 15 (member port 8443) were
 corrected; the unit is reinstalled and the rule swapped as recorded below.
 
 **2026-09-18, Open WebUI through the WAF (§8.1 steps 1 to 12).** Built on the FortiWeb
-by the bank's WAF administrator; virtual IP `10.50.11.14`, bank-signed certificate in
+by the organisation's WAF administrator; virtual IP `198.51.100.14`, internally signed certificate in
 place. No DNS record yet, so the test pins the name with curl (`--resolve
-aiproxy.xalqbank.az:443:10.50.11.14`), which sets SNI and `Host` like a browser would:
+aiproxy.example.org:443:198.51.100.14`), which sets SNI and `Host` like a browser would:
 `/health` answers `200`, `server: uvicorn`, `{"status":true}`, and `/` answers `200`
 with the 11247-byte login page, both with the certificate validated (no `-k`). The WAF
 adds its own tracking cookie `cookiesession1` (client management, persistent one year
 by default; `set http-session-cookie enable` on the profile makes it a session cookie).
-A request to the bare address (`https://10.50.11.14/`, `Host` not the protected
+A request to the bare address (`https://198.51.100.14/`, `Host` not the protected
 hostname) gets the WAF's own `500 Internal Server Error` page: the protected-hostname
 rule of step 5 working, which is what was first taken for a fault. Open point: the
 response carries no `strict-transport-security` header, so Add HSTS Header of step 10
@@ -641,7 +641,7 @@ access line names the client as `10.89.0.16`, which `podman inspect` shows to be
 WebUI container's own address on `llmgw-backend` (`10.89.0.0/24`, gateway `10.89.0.1`).
 That is how rootless Podman publishes a port: the `rootlessport` helper accepts the
 connection on the host and opens a new one inside the container network, so the peer is
-never the WAF. `FORWARDED_ALLOW_IPS=10.50.4.100` therefore never matched and the
+never the WAF. `FORWARDED_ALLOW_IPS=192.0.2.100` therefore never matched and the
 `X-Forwarded-For` header was ignored. Fixed: the variable names the backend subnet
 (uvicorn 0.51.0, pinned by v0.11.3, accepts a network there), the subnet is pinned in
 `llmgw-backend.network` (`Subnet=`, `Gateway=`; Quadlet's `network create --ignore`
@@ -658,7 +658,7 @@ show the WAF's health checks; §8.4 step 4 uses another path.
 Fix installed the same day: unit and network file from commit cf14035 (sizes 6443 and
 716, CRLF 0, diffs the planned lines), `daemon-reload`, restart of
 `llmgw-openwebui.service`, all five healthy, the network unchanged (`10.89.0.0/24 gw
-10.89.0.1`). Proof: `curl -H 'X-Forwarded-For: 203.0.113.9' http://10.50.4.68:8080/api/version`
+10.89.0.1`). Proof: `curl -H 'X-Forwarded-For: 203.0.113.9' http://192.0.2.10:8080/api/version`
 from the host is logged as `203.0.113.9:0 - "GET /api/version HTTP/1.1" 200`. After the
 restart the container came up as `10.89.0.18`, no longer `.16`, which confirms that the
 subnet, not a single address, was the right value to trust.
@@ -690,18 +690,18 @@ that exited at 16:13:11; firewalld's log-denied state; the rsyslog target) shows
   then healthy from 16:13:42; the unit's `HealthStartPeriod=180s` covers it). firewalld
   `log-denied` is still `unicast` from the §8.3 test and logged no drop all day, so
   the WAF's packets are all accepted; it is switched off again. `rsyslog` forwards
-  `*.* @@linux-mon.xalqbank.az` (TCP 514) and times out every four minutes: a network
+  `*.* @@linux-mon.example.org` (TCP 514) and times out every four minutes: a network
   path item for the monitoring team, outside this project. LiteLLM's two non-loopback
   lines are host-side curls through its published port (container-side addresses,
   the rootlessport effect); the WAF has no LiteLLM policy yet.
 
 **2026-09-18, the WAF's own logs (screenshots).** Attack log, host
-`aiproxy.xalqbank.az`, severity above Informative: two rows only, 15:23:31 and
-15:23:33, source 10.240.234.5 (the workstation's browser, TLS 1.2), `GET /` and
+`aiproxy.example.org`, severity above Informative: two rows only, 15:23:31 and
+15:23:33, source 198.51.100.5 (the workstation's browser, TLS 1.2), `GET /` and
 `GET /favicon.ico`, `Protected Hostnames` / `HTTP Host Violation`, Alert_Deny: the name
 was not yet in the protected-hostname list; nothing since. Traffic log, same host: the
 policy is **`InternalSystemsPolicy`**, HTTP content routing and server pool both named
-`10.50.4.68_8080`, Monitor Mode Disabled, i.e. Open WebUI was added to an existing
+`192.0.2.10_8080`, Monitor Mode Disabled, i.e. Open WebUI was added to an existing
 shared server policy rather than the dedicated `sp-openwebui` of §8.1; whatever
 profile, signature set, constraints, chunk-encoding and HTTP/2 settings that policy has
 apply to Open WebUI, in blocking mode, and any change for Open WebUI (chunk-encoding,
@@ -715,7 +715,7 @@ a Return Code filter over the whole period is the next read.
 log, Date >= 2026/09/17 16:53 and Return Code >= 400, every host: no results. So no
 client has received a 4xx or 5xx through a server policy since the pool went up; the
 two 15:23 rows of the attack log (block page, 500, `HTTP Host Violation`) remain the
-only 500 on record. The internal A record for `aiproxy.xalqbank.az` exists now; the
+only 500 on record. The internal A record for `aiproxy.example.org` exists now; the
 browser still reports a 500, and the request was to inspect the repository and the
 container configuration once more before a server restart. Done, against the sources
 rather than the docs: the seven unit files run through the Quadlet generator of Podman
@@ -783,7 +783,7 @@ requests are missing" is expected on every load after the first.
 Same day, the test run. In the container the file is `52.BqbfVCEz.js`; the journal of
 the day had no request for it (`grep -c 'nodes/52\.'` printed 0) while the browser was
 producing the error page. From the workstation's command prompt,
-`curl.exe ... https://aiproxy.xalqbank.az/_app/immutable/nodes/52.BqbfVCEz.js`
+`curl.exe ... https://aiproxy.example.org/_app/immutable/nodes/52.BqbfVCEz.js`
 answered `200` and 22955 bytes (the size of the file in the 0.11.3 build), and the
 journal logged the request one second later: `10.89.0.18:45336 - "GET
 /_app/immutable/nodes/52.BqbfVCEz.js HTTP/1.1" 200`. So the WAF forwards that URL and
@@ -823,7 +823,7 @@ zstd over HTTPS only, which is why the tunnel tests of docs/07 (plain HTTP) neve
 the symptom and why the 09-18 curl of `/` (no `Accept-Encoding`) passed. Proof, one
 file, both sides of the WAF, the same minute:
 
-- server, as `llmgw`, straight to `10.50.4.68:8080`, `Accept-Encoding: zstd`:
+- server, as `llmgw`, straight to `192.0.2.10:8080`, `Accept-Encoding: zstd`:
   `content-encoding: zstd`, `transfer-encoding: chunked`, 248866 bytes, which the
   container's own `zstandard` decompresses to 1030641; with `gzip`: chunked, 276634
   bytes, `gzip -dc` gives 1030641.
@@ -888,7 +888,7 @@ requested from the host with `Accept-Encoding: zstd` answers `content-length: 10
 with no `content-encoding` and no `transfer-encoding`. Through the WAF, with zstd
 offered: `200`, 1030641 bytes, hash `dbd9b845…0bb04`, the container's file. In the
 browser, `fetch(..., {cache: 'reload'})` of the same module: 200, 1030641 bytes,
-`server: uvicorn`, no `content-encoding`; and `https://aiproxy.xalqbank.az/` lands on
+`server: uvicorn`, no `content-encoding`; and `https://aiproxy.example.org/` lands on
 `/auth?redirect=%2F`, the redirect that only the `(app)` layout issues, so nodes 2 and
 9 import and the login form renders. One rollout note: the console test on the page
 that was open before the restart still failed on nodes 2 and 9, from the browser's
@@ -912,7 +912,7 @@ address; the item is §8.6 item 1. A wire capture on the host (a stand-in listen
 not run: the fix is the same rule whether the header is absent or unusable.
 
 **2026-09-21, §8.4 steps 1 and 2 through the WAF.** Login as the admin at
-`https://aiproxy.xalqbank.az/`; the name test answers `Hello Dennis Yurichev, it's
+`https://aiproxy.example.org/`; the name test answers `Hello Jane Doe, it's
 great to meet you!` (name and e-mail masked on the way out, the name restored on the
 way back); the card prompt of docs/05 §5.7a answers `Visa "5555 5555 5555 4444"`, the
 documented demonstration: the model reasons about `<CREDIT_CARD_1>` only, guesses the

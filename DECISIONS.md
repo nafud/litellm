@@ -257,8 +257,8 @@ provider variable yet; the egress rule stays `tcp dport 443` to any address unti
 provider exists to narrow it to.
 
 ## D-20 Hostname and phase 2 sequence
-Hostname `xbbovsrlllm001.xalqbank.az`, following the company pattern seen on the host
-(`xbbovsransb001`); the owner's first proposal carried the IP address inside the name,
+Hostname `llmgw01.example.org`, following the company pattern seen on the host
+(`ansible01`); the owner's first proposal carried the IP address inside the name,
 which is invalid (dots are label separators, an all-digit last label) and brittle. The
 address is kept in `/etc/hosts` until DNS carries it. Phase 2 runs in this order:
 hostname, Satellite registration (brought forward from phase 3 so the system can be
@@ -367,7 +367,7 @@ Chosen 2026-09-16 for the supervisor demonstration and first use, over a local m
 server (Ollama or llama.cpp on this VM's CPU): no new container, no memory taken from the
 Presidio budget, real answers. Public name `gemini-2.5-flash`, key variable
 `GEMINI_API_KEY` in `litellm.env` only. Consequences, to be stated to the supervisor:
-requests leave the bank after masking; on the free tier Google may use them to improve
+requests leave the organisation after masking; on the free tier Google may use them to improve
 its products, the paid tier has other terms; the guardrail masks only text parts, an
 attached file or image goes to Google unmasked (docs/05 §5.7). `mock-echo` is kept as a
 test-only entry (docs/05 §5.9, docs/06 §6.3); user keys never list it. Egress today is
@@ -389,7 +389,7 @@ upload with local text extraction. Runner-up LibreChat (MIT, LDAP, OIDC, SAML) n
 MongoDB (SSPL image) plus four containers for file chat and admin. AnythingLLM has no
 directory integration and no per-user attribution; chat-ui has no local accounts.
 Licence note for the supervisor: Open WebUI's licence forbids removing its branding
-above 50 users without an enterprise licence; the bank does not rebrand. Chat history
+above 50 users without an enterprise licence; the organisation does not rebrand. Chat history
 is stored unmasked in the front-end's database on the server because Presidio runs
 downstream; goes into the backup discussion (D-28).
 
@@ -410,7 +410,7 @@ forwards to the vendor); free models are capped at 20 requests per minute and 50
 until 10 dollars of credits are bought, then 1,000 per day, and the account setting that
 excludes providers training on inputs removes most free endpoints. Figures from
 OpenRouter's help centre as read on 2026-09-17, to be confirmed on openrouter.ai before
-use. Becomes attractive when the bank pays: one contract and one key for many vendors,
+use. Becomes attractive when the organisation pays: one contract and one key for many vendors,
 and a zero-data-retention routing flag. D-29 stands.
 
 Amended 2026-09-17, same day: the Gemini key was not obtained and an OpenRouter key on a
@@ -463,9 +463,9 @@ is the admin, sign-up closed, new accounts pending until activated; LDAP and OID
 exist in the same unit for the Active Directory step.
 
 ## D-33 Exposure through the FortiWeb WAF; plain HTTP on the WAF-to-server leg
-Decided 2026-09-17. The users reach Open WebUI as `https://aiproxy.xalqbank.az`
-through the bank's FortiWeb WAF, which holds the certificate (issued by the WAF's CA,
-trusted on the workstations), terminates TLS and forwards to `10.50.4.68:8080` over
+Decided 2026-09-17. The users reach Open WebUI as `https://aiproxy.example.org`
+through the organisation's FortiWeb WAF, which holds the certificate (issued by the WAF's CA,
+trusted on the workstations), terminates TLS and forwards to `192.0.2.10:8080` over
 plain HTTP. No reverse proxy is added on the server: the WAF already is one, and a
 rootless container cannot bind 443 (`net.ipv4.ip_unprivileged_port_start` is 1024,
 docs/02 §2.7; lowering it would let every account bind privileged ports, and a root
@@ -473,7 +473,7 @@ container contradicts D-11). Resolves D-10 for the users' side; the LiteLLM admi
 stays on the SSH tunnel.
 
 The WAF-to-server leg is unencrypted by choice (option 1 of two considered). It is
-confined by firewalld to the WAF's address `10.50.4.100`, so the only path to the
+confined by firewalld to the WAF's address `192.0.2.100`, so the only path to the
 container runs through the WAF and the forwarded client address cannot be forged
 (`FORWARDED_ALLOW_IPS` in the unit; uvicorn's default trusts everyone; corrected
 2026-09-18, amendment 4: the value is the backend subnet, not the WAF address). Option 2, TLS on
@@ -485,7 +485,7 @@ before Presidio, so its request-body logging is off for this name; the session c
 carries the Secure flag; firewalld comes up now (D-22 deferral ends) with the `ssh`
 service still open until the admin ranges are known.
 
-`litellm.xalqbank.az` is the second step, for developer tools with a virtual key each
+`litellm.example.org` is the second step, for developer tools with a virtual key each
 (docs/06 §6.6), and waits for the first such key: on the free tier one coding assistant
 would exhaust the account's 50 requests per day. Same layout with port 4000,
 `use_x_forwarded_for: true`, and the WAF exposing `/v1/` only; supersedes docs/05
@@ -502,7 +502,7 @@ before enforcement. The firewalld address is the FortiWeb's server-side interfac
 address, verified on the server with firewalld's denied-packet log if the pool member
 stays down.
 
-Amended 2026-09-18 (2): `litellm.xalqbank.az` goes live together with Open WebUI, on
+Amended 2026-09-18 (2): `litellm.example.org` goes live together with Open WebUI, on
 request, instead of waiting for the first developer key; the free-tier limit stands (50
 requests per day shared by every key until the Gemini key exists, D-31). The WAF
 forwards only the inference paths, by a URL access allowlist on that policy (docs/08
@@ -514,7 +514,7 @@ SANs serves both server policies.
 
 Amended 2026-09-18 (3): the host port for the WAF leg to LiteLLM is 8443, not 4000.
 Tested from the FortiWeb CLI with `execute telnettest` against listeners on the server:
-the path between the WAF and 10.50.4.68 passes 443, 8080 and 8443 and drops 3000, 4000,
+the path between the WAF and 192.0.2.10 passes 443, 8080 and 8443 and drops 3000, 4000,
 8000, 8081, 8888 and 9000 (docs/08 Results), the shape of a standing web-ports rule.
 8443 over 443 because a rootless publish on 443 would need the unprivileged-port sysctl.
 The port carries plain HTTP (pool member SSL off), like 8080; the container port and the
